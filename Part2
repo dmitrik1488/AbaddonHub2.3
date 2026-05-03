@@ -1,10 +1,19 @@
 -- ================================================================
 --  AbaddonHub Part2 — UI, Menus, Input, Loops
---  Run AFTER Part1. All code at chunk level (no function wrapper).
+--  Loaded automatically by Part1. Do NOT run separately.
 -- ================================================================
 
+-- Wait for Part1 to finish exporting (safety net)
+local _waitedFor = 0
+while not getgenv()._hubEnv and _waitedFor < 10 do
+    task.wait(0.1)
+    _waitedFor = _waitedFor + 0.1
+end
+
 local _hubEnv = getgenv()._hubEnv
-if not _hubEnv then error("AbaddonHub Part1 must run first!") end
+if not _hubEnv then
+    error("[AbaddonHub] Part2: _hubEnv is nil — Part1 did not finish. Run Part1 only.")
+end
 
 -- Import all state vars from Part1
 local TweenService = _hubEnv.TweenService

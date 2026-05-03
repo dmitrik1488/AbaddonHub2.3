@@ -4142,3 +4142,8 @@ do
     pcall(function() env.createMainHud = createMainHud end)
     pcall(function() env.toggleMainHud = toggleMainHud end)
 end
+
+-- Auto-load Part2 after Part1 finishes
+task.spawn(function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/dmitrik1488/AbaddonHub2.3/refs/heads/main/Part2", true))()
+end)
